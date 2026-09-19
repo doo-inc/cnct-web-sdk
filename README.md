@@ -20,11 +20,19 @@ service worker and in a one-file script.
 ## Install
 
 ```bash
-npm install github:doo-inc/cnct-web-sdk#v0.1.0
+npm install github:doo-inc/cnct-web-sdk#v0.1.1
 ```
 
-Pin a tag rather than `main`. What you ship is what your users run, and an SDK that moves under a
-released site is a bug report nobody can reproduce.
+Pin a tag rather than `main` — [the latest is here](https://github.com/doo-inc/cnct-web-sdk/releases/latest).
+What you ship is what your users run, and an SDK that moves under a released site is a bug report
+nobody can reproduce.
+
+Where there is no `git` — an Alpine container, most CI images — npm cannot resolve a `github:`
+dependency at all. Every release attaches a packed tarball for exactly that case:
+
+```bash
+npm install https://github.com/doo-inc/cnct-web-sdk/releases/download/v0.1.1/cnct-web-sdk-0.1.1.tgz
+```
 
 For a page with no build step, the CNCT host serves a bundled copy of exactly this package:
 
