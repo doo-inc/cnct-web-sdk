@@ -1,7 +1,7 @@
 {
   "name": "cnct-web-sdk",
-  "version": "0.1.0",
-  "description": "The official CNCT SDK for browsers and Node — live chat, contacts, bookings and tickets against a CNCT workspace, using the credentials CNCT issues you.",
+  "version": "0.1.1",
+  "description": "The official CNCT SDK for browsers and Node \u2014 live chat, contacts, bookings and tickets against a CNCT workspace, using the credentials CNCT issues you.",
   "type": "module",
   "license": "BSD-3-Clause",
   "author": "DOO Inc",

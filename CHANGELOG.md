@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.1.1
+
+- **A disconnect during the handshake no longer throws in Node.** `ws` raises an 'error' event where
+  a browser fires one nobody has to catch, and an unhandled one on an EventEmitter is a throw — so a
+  server-side integration that started a chat and shut down a moment later took the process with it.
+  There is a listener now, and `disconnect()` closes a connecting socket on 'open' rather than
+  mid-handshake. A socket abandoned that way also no longer authenticates and holds a keep-alive
+  open.
+- The test suite supplies a socket the way Node 18 and 20 must, so both that path and the global one
+  are covered rather than whichever the machine happens to have.
+
 ## 0.1.0
 
 First release as a package of its own. The chat client is the one that shipped inside the platform at
