@@ -339,6 +339,48 @@ describe('the compatibility factory', () => {
   });
 });
 
+describe('tearing down', () => {
+  /**
+   * **This crashed a Node process, and only a Node one.** `disconnect()` closed whatever socket it
+   * held, including one still shaking hands — legal in a browser, which just aborts the handshake,
+   * and an `error` event under `ws`, which throws when nothing is listening for one. A server-side
+   * integration that started a chat and shut down a moment later took the process with it.
+   *
+   * Vitest fails a run on an unhandled error, so doing it is the assertion.
+   */
+  it('survives a disconnect while the handshake is still in flight', async () => {
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const chat = clientFor(cnct);
+      const started = chat.start({ displayName: 'Layla' });
+      // No await on the connection: this is the tick where the socket is CONNECTING.
+      chat.disconnect();
+      await started;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    expect(true).toBe(true);
+  });
+
+  it('does not authenticate a socket nobody is reading any more', async () => {
+    const chat = clientFor(cnct);
+    await chat.start({ displayName: 'Layla' });
+    chat.disconnect();
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    // The abandoned socket closed itself rather than authenticating and holding a keep-alive open.
+    expect(cnct.sockets.length).toBe(0);
+    expect(chat.state.status).not.toBe('live');
+  });
+
+  it('stays quiet when a connection is refused outright', async () => {
+    const chat = new Cnct({
+      // Nothing is listening here. Under `ws` this is an 'error' event and then a close.
+      baseUrl: 'http://127.0.0.1:1',
+      WebSocket: socketFactory,
+    }).chat('inbox-public-key', { tokenStore: memoryTokenStore() });
+    await expect(chat.boot()).rejects.toMatchObject({ code: 'offline' });
+    chat.disconnect();
+  });
+});
+
 describe('which WebSocket it opens', () => {
   /**
    * Node gained a global `WebSocket` in 22. Both paths are real deployments — a browser and Node 22

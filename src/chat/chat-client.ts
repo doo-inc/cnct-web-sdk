@@ -341,6 +341,13 @@ export class CnctChatClient {
     this.socket = opened;
 
     opened.addEventListener('open', () => {
+      /**
+       * A socket we have since disconnected from or replaced. Close it now rather than
+       * authenticating and starting a keep-alive on a connection nobody is reading — and note that
+       * closing it *here* is the only safe moment: `ws` raises on a close during the handshake,
+       * where a browser simply aborts it.
+       */
+      if (this.socket !== opened) return void opened.close(1000, 'Client closed');
       opened.send(JSON.stringify({ type: 'auth', token: this.token }));
       this.stopKeepAlive();
       // Quiet connections get closed by proxies long before they get closed by anybody's intent.
@@ -350,6 +357,7 @@ export class CnctChatClient {
     });
 
     opened.addEventListener('message', (event: MessageEvent) => {
+      if (this.socket !== opened) return;
       let frame: Record<string, any>;
       try {
         frame = JSON.parse(String(event.data));
@@ -359,7 +367,23 @@ export class CnctChatClient {
       this.handleFrame(frame);
     });
 
+    /**
+     * **A browser fires this and expects nothing of you; `ws` treats an unhandled 'error' as a
+     * throw.** So on Node — which is exactly where this SDK tells you to pass `ws`, because there
+     * is no global WebSocket before 22 — an abandoned handshake or a refused connection became an
+     * uncaught exception in somebody else's process.
+     *
+     * Nothing to do here but say so quietly. `close` always follows, and that is what moves the
+     * status and schedules the reconnect; raising it twice would only put a failure in front of a
+     * customer that the client is already recovering from.
+     */
+    opened.addEventListener('error', () => {
+      this.config.logger?.('debug', 'the chat socket errored; a close and a retry follow');
+    });
+
     opened.addEventListener('close', (event: CloseEvent) => {
+      // Abandoned by `disconnect` or replaced by a later connect: it has already done this work.
+      if (this.socket !== opened) return;
       this.stopKeepAlive();
       this.socket = null;
       this.socketSendSupported = false;
@@ -389,8 +413,12 @@ export class CnctChatClient {
     this.reconnectTimer = null;
     this.stopKeepAlive();
     this.rejectAllAwaiting(new CnctError('Disconnected.', CnctErrorCode.offline));
-    if (this.socket) this.socket.close(1000, 'Client closed');
+    const socket = this.socket;
+    // Cleared first: it is what the handlers above read to tell a live socket from an abandoned one.
     this.socket = null;
+    // `readyState` 0 is a handshake still in flight, and closing one raises under `ws`. The `open`
+    // handler closes it instead, on the tick where doing so is legal everywhere.
+    if (socket && socket.readyState === 1) socket.close(1000, 'Client closed');
   }
 
   private openSocket(): WebSocket {
