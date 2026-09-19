@@ -1,7 +1,8 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import WebSocket from 'ws';
 import { memoryTokenStore } from '../src/index.js';
 import { startMockCnct, type MockCnct } from './support/server.js';
 
@@ -27,9 +28,16 @@ beforeAll(async () => {
   }
   hosted = (await import(pathToFileURL(bundlePath).href)) as typeof import('../src/hosted.js');
   cnct = await startMockCnct();
+  /**
+   * This build is for browsers, and a browser has always had a `WebSocket` — which is why it takes
+   * no factory the way the package does. Node only grew one in 22, so it borrows `ws` to stand in
+   * for the runtime this file actually ships to.
+   */
+  vi.stubGlobal('WebSocket', WebSocket);
 });
 
 afterAll(async () => {
+  vi.unstubAllGlobals();
   await cnct.close();
 });
 

@@ -19,8 +19,18 @@ afterEach(async () => {
   await cnct.close();
 });
 
+/**
+ * Node only grew a global `WebSocket` in 22, so the suite supplies one — which is not a workaround
+ * but the documented arrangement for 18 and 20, exercised here on every run rather than in a single
+ * test that would pass on a laptop and prove nothing about the version half of CI is on.
+ */
+const socketFactory = (url: string) => new WebSocket(url) as unknown as globalThis.WebSocket;
+
+const sdkFor = (server: MockCnct) =>
+  new Cnct({ baseUrl: server.baseUrl, WebSocket: socketFactory });
+
 const clientFor = (server: MockCnct, options: { storageKey?: string } = {}) =>
-  new Cnct({ baseUrl: server.baseUrl }).chat('inbox-public-key', {
+  sdkFor(server).chat('inbox-public-key', {
     tokenStore: memoryTokenStore(),
     ...options,
   });
@@ -260,16 +270,12 @@ describe('a session that stops working', () => {
 describe('keeping the visitor', () => {
   it('comes back to the same thread through a store that outlives the client', async () => {
     const store = memoryTokenStore();
-    const first = new Cnct({ baseUrl: cnct.baseUrl }).chat('inbox-public-key', {
-      tokenStore: store,
-    });
+    const first = sdkFor(cnct).chat('inbox-public-key', { tokenStore: store });
     await first.start({ displayName: 'Layla' });
     await first.send('Before the reload');
     first.disconnect();
 
-    const second = new Cnct({ baseUrl: cnct.baseUrl }).chat('inbox-public-key', {
-      tokenStore: store,
-    });
+    const second = sdkFor(cnct).chat('inbox-public-key', { tokenStore: store });
     expect(second.hasSession).toBe(true);
     const resumed = await second.resume();
     expect(resumed?.messages?.[0]?.body).toBe('Before the reload');
@@ -286,7 +292,7 @@ describe('keeping the visitor', () => {
       write: async (key: string, value: string) => void held.set(key, value),
       clear: async (key: string) => void held.delete(key),
     };
-    const chat = new Cnct({ baseUrl: cnct.baseUrl }).chat('inbox-public-key', { tokenStore: slow });
+    const chat = sdkFor(cnct).chat('inbox-public-key', { tokenStore: slow });
     await chat.ready;
     await chat.start({ displayName: 'Layla' });
     await new Promise((resolve) => setTimeout(resolve, 10));
@@ -333,26 +339,55 @@ describe('the compatibility factory', () => {
   });
 });
 
-describe('a runtime without a global WebSocket', () => {
-  it('takes one from the config', async () => {
-    const chat = new Cnct({
-      baseUrl: cnct.baseUrl,
-      WebSocket: (url) => new WebSocket(url) as unknown as globalThis.WebSocket,
-    }).chat('inbox-public-key', { tokenStore: memoryTokenStore() });
+describe('which WebSocket it opens', () => {
+  /**
+   * Node gained a global `WebSocket` in 22. Both paths are real deployments — a browser and Node 22
+   * have one, Node 18 and 20 do not — so both are tested rather than whichever one the machine
+   * running this happens to be.
+   */
+  it.skipIf(typeof globalThis.WebSocket === 'undefined')(
+    'uses the global where the runtime has one',
+    async () => {
+      const chat = new Cnct({ baseUrl: cnct.baseUrl }).chat('inbox-public-key', {
+        tokenStore: memoryTokenStore(),
+      });
+      const connected = once(chat, 'connected');
+      await chat.start({ displayName: 'Layla' });
+      await connected;
+      expect(chat.state.status).toBe('live');
+      chat.disconnect();
+    },
+  );
+
+  it('takes one from the config where it does not', async () => {
+    const chat = sdkFor(cnct).chat('inbox-public-key', { tokenStore: memoryTokenStore() });
     const connected = once(chat, 'connected');
     await chat.start({ displayName: 'Layla' });
     await connected;
     expect(chat.state.status).toBe('live');
     chat.disconnect();
   });
+
+  it('says which of the two you are missing, rather than failing like a dead network', async () => {
+    const globalWebSocket = globalThis.WebSocket;
+    // @ts-expect-error — standing in for Node 18 and 20, where this is simply absent.
+    delete globalThis.WebSocket;
+    try {
+      const chat = new Cnct({ baseUrl: cnct.baseUrl }).chat('inbox-public-key', {
+        tokenStore: memoryTokenStore(),
+      });
+      await expect(chat.start({ displayName: 'Layla' })).rejects.toThrow(/has no WebSocket/);
+      chat.disconnect();
+    } finally {
+      if (globalWebSocket) globalThis.WebSocket = globalWebSocket;
+    }
+  });
 });
 
 describe('a CNCT behind a path prefix', () => {
   it('puts every request, and the socket, under it', async () => {
     const proxied = await startMockCnct({ prefix: '/support' });
-    const chat = new Cnct({ baseUrl: proxied.baseUrl }).chat('inbox-public-key', {
-      tokenStore: memoryTokenStore(),
-    });
+    const chat = sdkFor(proxied).chat('inbox-public-key', { tokenStore: memoryTokenStore() });
     const connected = once(chat, 'connected');
     await chat.start({ displayName: 'Layla' });
     await connected;
