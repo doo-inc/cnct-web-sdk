@@ -1,0 +1,232 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>CNCT chat — a whole interface in one file</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+
+<!--
+  A complete chat interface on the CNCT web SDK. No build step, no framework, no dependencies: it loads
+  the SDK from the CNCT host as an ES module and renders `chat.state` on every change.
+
+  It is deliberately plain. The point of a headless SDK is that the interface is yours, so this shows
+  the wiring rather than a design — about a hundred lines you would replace entirely.
+
+    index.html?host=https://your-cnct-host&inbox=your-inbox-public-key
+-->
+
+<style>
+  body {
+    font:
+      15px/1.5 system-ui,
+      sans-serif;
+    margin: 0;
+    display: grid;
+    place-items: center;
+    min-height: 100vh;
+    background: #f6f6f7;
+  }
+  main {
+    width: min(440px, 100%);
+    height: min(640px, 100vh);
+    background: #fff;
+    border-radius: 12px;
+    display: grid;
+    grid-template-rows: auto 1fr auto;
+    overflow: hidden;
+    box-shadow: 0 1px 3px #0002;
+  }
+  header {
+    padding: 14px 16px;
+    border-bottom: 1px solid #eee;
+  }
+  header b {
+    display: block;
+  }
+  header small {
+    color: #777;
+  }
+  #log {
+    overflow-y: auto;
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .bubble {
+    padding: 8px 12px;
+    border-radius: 14px;
+    max-width: 78%;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+  .CALLER {
+    align-self: flex-end;
+    background: #b52d93;
+    color: #fff;
+  }
+  .AI,
+  .OPERATOR,
+  .SYSTEM {
+    align-self: flex-start;
+    background: #f1f1f3;
+  }
+  .pending {
+    opacity: 0.55;
+  }
+  .failed {
+    outline: 1px solid #c00;
+  }
+  .failed button {
+    all: unset;
+    cursor: pointer;
+    text-decoration: underline;
+    font-size: 12px;
+    display: block;
+    margin-top: 4px;
+  }
+  .card {
+    align-self: flex-start;
+    background: #fff;
+    border: 1px solid #ddd;
+    border-radius: 10px;
+    padding: 10px 12px;
+    max-width: 78%;
+  }
+  .card b {
+    display: block;
+    font-size: 13px;
+    color: #b52d93;
+  }
+  #typing {
+    padding: 0 16px 6px;
+    color: #777;
+    font-size: 13px;
+    height: 20px;
+  }
+  form {
+    display: flex;
+    gap: 8px;
+    padding: 12px;
+    border-top: 1px solid #eee;
+  }
+  input {
+    flex: 1;
+    padding: 10px 12px;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    font: inherit;
+  }
+  button[type='submit'] {
+    padding: 10px 16px;
+    border: 0;
+    border-radius: 8px;
+    background: #b52d93;
+    color: #fff;
+    font: inherit;
+    cursor: pointer;
+  }
+  button[disabled] {
+    opacity: 0.5;
+    cursor: default;
+  }
+  #error {
+    color: #c00;
+    padding: 0 16px;
+    font-size: 13px;
+  }
+</style>
+
+<main>
+  <header><b id="business">…</b><small id="status">connecting</small></header>
+  <div id="log"></div>
+  <div id="typing"></div>
+  <div id="error"></div>
+  <form id="composer">
+    <input id="text" placeholder="Write a message" autocomplete="off" />
+    <button type="submit">Send</button>
+  </form>
+</main>
+
+<script type="module">
+  const params = new URLSearchParams(location.search);
+  const host = params.get('host');
+  const inbox = params.get('inbox');
+  if (!host || !inbox) {
+    document.body.textContent = 'Add ?host=https://your-cnct-host&inbox=your-inbox-public-key';
+    throw new Error('missing host or inbox');
+  }
+
+  // The hosted build defaults `baseUrl` to the origin it was served from — which is this host — so
+  // there is nothing to configure. Installed from npm instead, you would pass `baseUrl` yourself.
+  const { createChatClient } = await import(new URL('/sdk/v1/cnct-chat.js', host));
+  const chat = createChatClient({ publicKey: inbox });
+
+  const log = document.getElementById('log');
+  const composer = document.getElementById('composer');
+  const text = document.getElementById('text');
+
+  chat.on('change', render);
+  chat.on('unauthenticated', () => chat.start({ displayName: 'Someone' }));
+
+  const inboxInfo = await chat.boot();
+  document.getElementById('business').textContent = `${inboxInfo.business} — ${inboxInfo.inbox}`;
+  if (!inboxInfo.isActive) {
+    composer.hidden = true;
+    document.getElementById('status').textContent = 'This inbox is closed.';
+  }
+
+  // Pick up where a reload left off, or wait for the first message to start a conversation.
+  await chat.resume();
+
+  composer.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const body = text.value.trim();
+    if (!body) return;
+    text.value = '';
+    if (!chat.hasSession) await chat.start({ displayName: 'Someone' });
+    // A rejection is already on `state.error` and the bubble is already marked, so there is nothing
+    // to do here but not crash.
+    chat.send(body).catch(() => {});
+  });
+
+  text.addEventListener('input', () => chat.typing());
+
+  function render(state) {
+    document.getElementById('status').textContent =
+      state.conversation?.withPerson && state.status === 'live' ? 'someone is here' : state.status;
+    document.getElementById('typing').textContent = state.theyAreTyping ? 'typing…' : '';
+    document.getElementById('error').textContent = state.error?.message ?? '';
+    // `canSend` is derived on the client rather than carried in the snapshot.
+    document.querySelector('button[type=submit]').disabled =
+      state.status !== 'idle' && !chat.canSend;
+
+    const atBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 40;
+    log.replaceChildren(...state.messages.map(bubbleFor));
+    if (atBottom) log.scrollTop = log.scrollHeight;
+  }
+
+  function bubbleFor(message) {
+    // A card type this file has never heard of falls through to its own body, which always reads as a
+    // complete sentence. That is what makes a new card type a non-breaking change.
+    if (message.type === 'TICKET_UPDATE' || message.type === 'BOOKING_UPDATE') {
+      const card = document.createElement('div');
+      card.className = 'card';
+      const title = document.createElement('b');
+      title.textContent =
+        message.type === 'TICKET_UPDATE' ? `Ticket #${message.data?.ticketNumber}` : 'Your booking';
+      card.append(title, document.createTextNode(message.body));
+      return card;
+    }
+
+    const bubble = document.createElement('div');
+    bubble.className = `bubble ${message.speaker}${message.pending ? ' pending' : ''}${message.failed ? ' failed' : ''}`;
+    bubble.textContent = message.body;
+    if (message.failed) {
+      const again = document.createElement('button');
+      again.textContent = 'Not sent — try again';
+      // Safe: the clientKey means a second attempt cannot double-post.
+      again.onclick = () => chat.retry(message.clientKey).catch(() => {});
+      bubble.append(again);
+    }
+    return bubble;
+  }
+</script>

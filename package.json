@@ -1,0 +1,68 @@
+{
+  "name": "cnct-web-sdk",
+  "version": "0.1.0",
+  "description": "The official CNCT SDK for browsers and Node — live chat, contacts, bookings and tickets against a CNCT workspace, using the credentials CNCT issues you.",
+  "type": "module",
+  "license": "BSD-3-Clause",
+  "author": "DOO Inc",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/doo-inc/cnct-web-sdk.git"
+  },
+  "bugs": {
+    "url": "https://github.com/doo-inc/cnct-web-sdk/issues"
+  },
+  "homepage": "https://github.com/doo-inc/cnct-web-sdk#readme",
+  "keywords": [
+    "cnct",
+    "doo",
+    "chat",
+    "customer-support",
+    "sdk",
+    "websocket"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "sideEffects": false,
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./widget": "./widget/cnct-widget.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "src",
+    "widget",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "npm run build:types && npm run build:hosted",
+    "build:types": "tsc -p tsconfig.build.json",
+    "build:hosted": "node scripts/build-hosted.mjs",
+    "prepare": "npm run build",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "@types/node": "^22.15.0",
+    "@types/ws": "^8.5.0",
+    "esbuild": "^0.25.0",
+    "prettier": "^3.5.0",
+    "typescript": "^5.8.0",
+    "vitest": "^3.1.0",
+    "ws": "^8.18.0"
+  }
+}

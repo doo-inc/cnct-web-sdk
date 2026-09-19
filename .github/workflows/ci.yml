@@ -1,0 +1,53 @@
+name: CI
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+
+jobs:
+  package:
+    name: Package
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 22 has a global WebSocket and 20 does not, which is the difference this SDK has to survive.
+        node: [20, 22]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - run: npm ci
+      - run: npm run format:check
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+
+  install:
+    name: Install as a git dependency
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      # What a client actually does. `prepare` has to build from source on a clean checkout, and a
+      # missing devDependency or a file left out of `files` only ever shows up here.
+      - name: Pack and install the tarball
+        run: |
+          npm ci
+          npm pack --pack-destination /tmp
+          mkdir /tmp/consumer && cd /tmp/consumer
+          npm init -y >/dev/null
+          npm install /tmp/cnct-web-sdk-*.tgz
+          node --input-type=module -e "
+            import { Cnct, CnctHosts, CnctError } from 'cnct-web-sdk';
+            const chat = new Cnct({ baseUrl: CnctHosts.development }).chat('k');
+            if (chat.state.status !== 'idle') throw new Error('unexpected initial state');
+            try { new Cnct({}); throw new Error('a missing host should have thrown'); }
+            catch (error) { if (!(error instanceof CnctError)) throw error; }
+            console.log('installed package works');
+          "
