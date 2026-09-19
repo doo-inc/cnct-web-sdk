@@ -1,0 +1,39 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+# A tag is what a client installs, so the tarball has to exist before anyone tries.
+#
+# Two ways in and both matter: `npm i github:doo-inc/cnct-web-sdk#v0.1.0` needs git, which a
+# developer has and an Alpine container does not — cnct-backend installs the asset this attaches for
+# exactly that reason. The bytes are `npm pack`'s, so `dist/` is inside and nothing has to build on
+# install.
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - name: Check the tag matches package.json
+        run: |
+          tagged="${GITHUB_REF_NAME#v}"
+          packaged="$(node -p "require('./package.json').version")"
+          if [ "$tagged" != "$packaged" ]; then
+            echo "Tag $GITHUB_REF_NAME does not match package.json version $packaged." >&2
+            exit 1
+          fi
+      - run: npm pack --pack-destination /tmp
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: /tmp/cnct-web-sdk-*.tgz
+          generate_release_notes: true
