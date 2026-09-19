@@ -155,17 +155,18 @@ closed.
 
 ### The methods
 
-|                                 |                                                                              |
-| ------------------------------- | ---------------------------------------------------------------------------- |
-| `boot()`                        | The inbox's greeting and whether it is open. No session needed.              |
-| `start({ displayName, phone })` | Begin, or resume as the same person. Opens the socket.                       |
-| `resume()`                      | Pick up after a reload. Resolves to `null` when there is nothing to pick up. |
-| `send(body, { clientKey })`     | Say something. Resolves with the stored message.                             |
-| `retry(clientKey)`              | Re-send a failed message. Safe — see idempotency below.                      |
-| `typing()`                      | Tell the other side. Throttled here and again on the server.                 |
-| `end()`                         | The visitor closes it.                                                       |
-| `fetchAttachment(attachment)`   | The bytes of a file an operator sent, as a `Blob`.                           |
-| `on(event, handler)`            | Returns the unsubscribe.                                                     |
+|                                 |                                                                                                        |
+| ------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| `boot()`                        | The inbox's greeting and whether it is open. No session needed.                                        |
+| `start({ displayName, phone })` | Begin, or resume as the same person. Opens the socket.                                                 |
+| `resume()`                      | Pick up after a reload. Resolves to `null` when there is nothing to pick up.                           |
+| `send(body, { clientKey })`     | Say something. Resolves with the stored message.                                                       |
+| `retry(clientKey)`              | Re-send a failed message. Safe — see idempotency below.                                                |
+| `typing()`                      | Tell the other side. Throttled here and again on the server.                                           |
+| `end()`                         | The visitor closes it.                                                                                 |
+| `fetchAttachment(attachment)`   | The bytes of a file an operator sent, as a `Blob`.                                                     |
+| `connect()` / `disconnect()`    | Open or drop the socket by hand. Safe at any moment — mid-handshake, and one straight after the other. |
+| `on(event, handler)`            | Returns the unsubscribe.                                                                               |
 
 Events: `change`, `message`, `typing`, `conversation`, `closed`, `connected`, `disconnected`,
 `unauthenticated`, `error`.
@@ -277,6 +278,12 @@ useEffect(() => {
 Then render `state.messages`, call `chat.send(text)` on submit and `chat.typing()` on keystroke. A
 message with `pending` is in flight; one with `failed` wants a retry button wired to
 `chat.retry(message.clientKey)`. A fuller version is in [`examples/react`](examples/react).
+
+**Strict mode is fine.** React runs that effect twice in development, so the client is asked to
+`resume()`, `disconnect()` and `resume()` again within a tick or two — a socket abandoned before its
+handshake finished, and a replacement opened before the first one's close comes back. Neither throws
+and neither reports the live socket gone; the client tells its own socket from one it has walked away
+from, and nothing else in your component has to know.
 
 ---
 

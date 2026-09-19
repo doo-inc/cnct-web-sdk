@@ -370,6 +370,39 @@ describe('tearing down', () => {
     expect(chat.state.status).not.toBe('live');
   });
 
+  /**
+   * **The half of this that is not about throwing.** A socket abandoned by `disconnect` closes a few
+   * milliseconds later — by which time `connect` may have opened its replacement, and that late
+   * close must not stop the replacement's keep-alive, forget it, or announce the client offline
+   * while it is live.
+   *
+   * React's strict mode does exactly this to the documented effect: resume, disconnect, resume,
+   * inside a tick or two. A client that reported itself gone there would look like a reconnect loop
+   * in development and nowhere else.
+   */
+  it('lets a replaced socket close late without reporting its successor gone', async () => {
+    const chat = clientFor(cnct);
+    const connected = once(chat, 'connected');
+    await chat.start({ displayName: 'Layla' });
+    await connected;
+
+    const seen: string[] = [];
+    chat.on('disconnected', () => seen.push('disconnected'));
+    chat.on('change', (state) => seen.push(state.status));
+    const reconnected = once(chat, 'connected');
+
+    chat.disconnect();
+    chat.connect();
+    await reconnected;
+    // The abandoned socket's close frame comes back behind the replacement's handshake.
+    await new Promise((resolve) => setTimeout(resolve, 200));
+
+    expect(seen).not.toContain('disconnected');
+    expect(seen).not.toContain('offline');
+    expect(chat.state.status).toBe('live');
+    chat.disconnect();
+  });
+
   it('stays quiet when a connection is refused outright', async () => {
     const chat = new Cnct({
       // Nothing is listening here. Under `ws` this is an 'error' event and then a close.
