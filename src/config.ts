@@ -1,7 +1,7 @@
 import { CnctError, CnctErrorCode } from './errors.js';
 
 /** The version this SDK reports in its `User-Agent`. Kept in step with `package.json`. */
-export const SDK_VERSION = '0.1.1';
+export const SDK_VERSION = '0.2.0';
 
 /**
  * The CNCT hosts this SDK knows about by name.
