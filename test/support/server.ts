@@ -123,10 +123,12 @@ export async function startMockCnct(options: { prefix?: string } = {}): Promise<
     }
 
     // ── Bookings and tickets ───────────────────────────────────────────────────────────────────
+    // Two keys, as the platform has two kinds: a sandbox key's every answer says `sandbox: true`.
+    const sandbox = AGENT_KEYS[String(request.headers.authorization)];
     if (request.method === 'GET' && path === '/api/booking-tools') {
-      if (request.headers.authorization !== 'Bearer kaer_sk_test')
-        return json(response, 401, { error: 'Unauthenticated' });
+      if (sandbox === undefined) return json(response, 401, { error: 'Unauthenticated' });
       return json(response, 200, {
+        sandbox,
         tools: [
           { name: 'check_availability', description: 'Free times', parameters: { type: 'object' } },
         ],
@@ -141,10 +143,10 @@ export async function startMockCnct(options: { prefix?: string } = {}): Promise<
       });
     }
     if (request.method === 'POST' && path.startsWith('/api/booking-tools/')) {
-      if (request.headers.authorization !== 'Bearer kaer_sk_test')
-        return json(response, 401, { error: 'Unauthenticated' });
+      if (sandbox === undefined) return json(response, 401, { error: 'Unauthenticated' });
       const tool = decodeURIComponent(path.slice('/api/booking-tools/'.length));
-      return json(response, 200, toolResult(tool, body as Record<string, unknown>));
+      const result = toolResult(tool, body as Record<string, unknown>);
+      return json(response, 200, sandbox ? { ...result, sandbox: true } : result);
     }
 
     // ── Auth and contacts ──────────────────────────────────────────────────────────────────────
@@ -277,6 +279,12 @@ export async function startMockCnct(options: { prefix?: string } = {}): Promise<
     },
   };
 }
+
+/** The keys this mock accepts on the booking tools, and whether each is a sandbox key. */
+const AGENT_KEYS: Record<string, boolean> = {
+  'Bearer kaer_sk_test': false,
+  'Bearer kaer_sk_test_sandbox': true,
+};
 
 function toolResult(tool: string, args: Record<string, unknown>): Record<string, unknown> {
   switch (tool) {

@@ -1,5 +1,5 @@
 /**
- * The build that CNCT itself serves, at `https://<your-cnct-host>/sdk/v1/cnct-chat.js`.
+ * The build that CNCT itself serves, at `https://app.doo.ooo/sdk/v1/cnct-chat.js`.
  *
  * It is the package, bundled into one dependency-free ES module a browser can load from a `<script
  * type="module">` with no build step of its own — and with **one** difference from the package:

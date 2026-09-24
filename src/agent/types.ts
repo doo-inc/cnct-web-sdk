@@ -93,6 +93,11 @@ export interface CnctBookingConfirmation {
   partySize: number | null;
   /** The person or table allocated, where the business names them. */
   resourceName: string | null;
+  /**
+   * True when a sandbox key made it: it is kept so it can be found, moved and cancelled, but it holds
+   * no slot, nobody was told, and the business will never see it.
+   */
+  sandbox: boolean;
 }
 
 /** One of a customer's upcoming bookings. */
@@ -136,9 +141,11 @@ export interface CnctTicketTypeDetail {
 
 /** A ticket that now exists. */
 export interface CnctRaisedTicket {
-  /** What a customer quotes back. */
+  /** What a customer quotes back. A sandbox has its own numbering, from 1. */
   ticketNumber: number;
   note: string | null;
+  /** True when a sandbox key raised it: it is in no queue and nobody will work it. */
+  sandbox: boolean;
 }
 
 /** One of a customer's open tickets. */

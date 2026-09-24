@@ -20,7 +20,7 @@ service worker and in a one-file script.
 ## Install
 
 ```bash
-npm install github:doo-inc/cnct-web-sdk#v0.1.1
+npm install github:doo-inc/cnct-web-sdk#v0.2.0
 ```
 
 Pin a tag rather than `main` — [the latest is here](https://github.com/doo-inc/cnct-web-sdk/releases/latest).
@@ -31,14 +31,14 @@ Where there is no `git` — an Alpine container, most CI images — npm cannot r
 dependency at all. Every release attaches a packed tarball for exactly that case:
 
 ```bash
-npm install https://github.com/doo-inc/cnct-web-sdk/releases/download/v0.1.1/cnct-web-sdk-0.1.1.tgz
+npm install https://github.com/doo-inc/cnct-web-sdk/releases/download/v0.2.0/cnct-web-sdk-0.2.0.tgz
 ```
 
 For a page with no build step, the CNCT host serves a bundled copy of exactly this package:
 
 ```html
 <script type="module">
-  import { createChatClient } from 'https://your-cnct-host/sdk/v1/cnct-chat.js';
+  import { createChatClient } from 'https://app.doo.ooo/sdk/v1/cnct-chat.js';
 </script>
 ```
 
@@ -46,25 +46,31 @@ The two are the same code. The difference is one default, and it is the next sec
 
 ---
 
-## Point it at your host
+## The host
 
+CNCT runs at **`https://app.doo.ooo`**, and that is where this SDK points unless you say otherwise.
 One value decides where everything goes — HTTP and the WebSocket alike, because the socket origin is
 derived from it rather than configured separately. There is nothing else to keep in step.
 
 ```js
-import { Cnct, CnctHosts } from 'cnct-web-sdk';
+import { Cnct } from 'cnct-web-sdk';
 
-const cnct = new Cnct({ baseUrl: 'https://your-cnct-host' });
+const cnct = new Cnct(); // https://app.doo.ooo — the same as CnctHosts.production
 ```
 
-It is **required, with no default**. There is one CNCT deployment today and it is a development box;
-defaulting to it would mean shipping to production by forgetting to set something. It is named as a
-constant so that swapping it later is one line:
+Pass `baseUrl` for anything else — CNCT behind your own domain, or a CNCT running on your laptop:
 
 ```js
-const cnct = new Cnct({ baseUrl: CnctHosts.development }); // today
-const cnct = new Cnct({ baseUrl: 'https://api.cnct.example' }); // when there is a production hostname
+const cnct = new Cnct({ baseUrl: 'http://localhost:3001' });
 ```
+
+**Testing is not a different host.** What decides whether a booking is real is the key — a
+[sandbox key](#sandbox-and-production) talks to the same `app.doo.ooo` and writes nothing real — so
+there is no staging URL to remember to swap before you ship.
+
+Before 0.2.0 the host was required and had no default, because the only CNCT deployment was a
+development box and a default would have meant shipping to it by accident. `CnctHosts.development`
+still compiles, and now points at production.
 
 Swapping at runtime — an environment picker in a debug menu, a remote config value, a `VITE_` variable
 — is `withBaseUrl`, and everything else in the config comes with it:
@@ -81,13 +87,13 @@ requests, and silently re-pointing those mid-conversation would be worse than ma
 
 ### The one exception
 
-The copy CNCT serves at `https://your-cnct-host/sdk/v1/cnct-chat.js` defaults `baseUrl` to the origin
-it was fetched from — which is right there, precisely because it _was_ fetched from CNCT, and an
+The copy CNCT serves at `https://app.doo.ooo/sdk/v1/cnct-chat.js` defaults `baseUrl` to the origin it
+was fetched from — which is right there, precisely because it _was_ fetched from CNCT, and an
 integrator cannot get it wrong or even has to be told it.
 
-Installed from npm and bundled into your own site, that same default resolves to **your** domain,
-where there is no CNCT to answer. So the package requires the host and the hosted file fills it in.
-Nothing else differs between them.
+Installed from npm and bundled into your own site, "the origin I came from" would be **your** domain,
+where there is no CNCT to answer. So the package defaults to CNCT production instead, and the hosted
+file to its own origin. Nothing else differs between them.
 
 ---
 
@@ -96,11 +102,11 @@ Nothing else differs between them.
 Which parts of this SDK you can use is decided entirely by what CNCT gave you. They are not
 interchangeable, and the difference is not convenience — it is what happens when one leaks.
 
-| Credential                | Opens                   | Where it belongs                                                                                                               |
-| ------------------------- | ----------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| `CnctChatPublicKey('…')`  | Live chat, as a visitor | **In your bundle.** It identifies an inbox, not a person, and it is already public — it is in the URL of the hosted chat page. |
-| `CnctApiKey('kaer_sk_…')` | Bookings and tickets    | **On a server you control.** It is account-wide: it can book for, and cancel for, anybody. Never in a page.                    |
-| `CnctOperatorToken('…')`  | The contact directory   | A staff app, from a person's own login. Eight hours, carrying that person's role.                                              |
+| Credential                | Opens                   | Where it belongs                                                                                                                                                          |
+| ------------------------- | ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `CnctChatPublicKey('…')`  | Live chat, as a visitor | **In your bundle.** It identifies an inbox, not a person, and it is already public — it is in the URL of the hosted chat page.                                            |
+| `CnctApiKey('kaer_sk_…')` | Bookings and tickets    | **On a server you control.** It is account-wide: it can book for, and cancel for, anybody. Never in a page. Mint one in the CNCT console under **Settings → Developers**. |
+| `CnctOperatorToken('…')`  | The contact directory   | A staff app, from a person's own login. Eight hours, carrying that person's role.                                                                                         |
 
 The SDK will tell you what it holds, which is useful for an app that hides the tabs it cannot serve
 rather than discovering the answer with a 401 in front of a customer:
@@ -111,6 +117,50 @@ Cnct.modulesFor(credentials); // ['chat'] | ['bookings', 'tickets'] | ['contacts
 
 `CnctApiKey` has `assertNotInBrowser()` for the mistake that matters: call it at startup and a key
 that has found its way into a bundle crashes in development rather than leaking in production.
+
+---
+
+## Sandbox and production
+
+An API key comes in two kinds, and the key says which. The account's owner or an admin mints either
+in the CNCT console, under **Settings → Developers**.
+
+|                      | Sandbox — `kaer_sk_test_…`                             | Production — `kaer_sk_live_…`         |
+| -------------------- | ------------------------------------------------------ | ------------------------------------- |
+| Reads                | The real account: services, people, hours, what's free | The same                              |
+| Book, move, cancel   | Kept in the account's sandbox, and findable again      | The real calendar                     |
+| Raise a ticket       | Kept in the sandbox, numbered from 1                   | The real queue                        |
+| Customers            | Never contacted, never looked up, never created        | Texted and filed as the account's own |
+| Seen by the business | Never — not the calendar, the queue or the reports     | Everywhere                            |
+
+Everything else is identical, and deliberately: a sandbox key runs **the same tools, the same
+validation and the same refusals** as production — a time that is not free, a ticket field that does
+not exist, a change inside the cancellation window are refused in production's own words. So an
+integration that works in sandbox is an integration that works, and going live is swapping the key.
+
+```js
+const key = new CnctApiKey(process.env.CNCT_API_KEY);
+key.mode; // 'sandbox' | 'production'
+key.isSandbox; // true for kaer_sk_test_…
+
+const agent = new Cnct().agent(key);
+const booking = await agent.bookings.create({ startsAt, customerPhone: '+97312345678' });
+booking.sandbox; // true — kept so you can find, move and cancel it, but nobody will ever see it
+```
+
+`catalogue()` returns `sandbox` too, which is the cheapest way to confirm which key a server is
+running with. Keys minted before there were two kinds are plain `kaer_sk_…`, and are production.
+
+Two things worth knowing:
+
+- **A sandbox booking does not take its slot.** Availability is the real calendar's, so the same free
+  time can be booked twice in sandbox. It is the one place sandbox is less faithful than production,
+  and it is on purpose: taking the slot would block a real customer.
+- **One sandbox per account**, shared by all its sandbox keys. Settings → Developers says what it holds
+  and empties it.
+
+Live chat has no sandbox mode — its credential is an inbox's public key, not an API key. To build a
+chat interface without landing in the team's real queue, ask for a second web inbox and use its key.
 
 ---
 
@@ -296,9 +346,7 @@ backend holding the key.
 ```js
 import { Cnct, CnctApiKey } from 'cnct-web-sdk';
 
-const agent = new Cnct({ baseUrl: process.env.CNCT_HOST }).agent(
-  new CnctApiKey(process.env.CNCT_API_KEY),
-);
+const agent = new Cnct().agent(new CnctApiKey(process.env.CNCT_API_KEY));
 
 const day = await agent.bookings.checkAvailability({ date: '2026-09-20', partySize: 4 });
 if (day.free.length) {
@@ -396,7 +444,7 @@ For a site that wants a bubble rather than an interface, [`widget/cnct-widget.js
 is the whole thing in one classic script:
 
 ```html
-<script src="https://your-cnct-host/widget/v1/cnct-widget.js" data-inbox="…" async></script>
+<script src="https://app.doo.ooo/widget/v1/cnct-widget.js" data-inbox="…" async></script>
 ```
 
 `data-position="left"` moves it, `data-color="#123456"` recolours the launcher, and

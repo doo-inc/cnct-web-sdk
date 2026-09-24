@@ -333,9 +333,13 @@ describe('the compatibility factory', () => {
     chat.disconnect();
   });
 
-  it('will not be built without a host, which is the one thing that changed', () => {
-    // @ts-expect-error — required in the package, precisely so it cannot be forgotten.
-    expect(() => createChatClient({ publicKey: 'inbox-public-key' })).toThrow(/host is required/i);
+  /**
+   * The one thing that differs from the hosted copy: without a host it goes to CNCT production, not
+   * to the page's own origin, which in a bundled site is somebody else's domain.
+   */
+  it('goes to production without a host, never to the page it is running on', () => {
+    const chat = createChatClient({ publicKey: 'inbox-public-key' });
+    expect(chat.config.baseUrl).toBe('https://app.doo.ooo');
   });
 });
 

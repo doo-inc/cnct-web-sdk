@@ -6,17 +6,24 @@ export const SDK_VERSION = '0.1.1';
 /**
  * The CNCT hosts this SDK knows about by name.
  *
- * **There is one today, and it is a dev box.** Naming it here rather than defaulting to it means
- * swapping to a production hostname later is one line in one file for an integrator, and — more to
- * the point — means nobody ships to production against a development host by *forgetting* to set
- * something. {@link CnctConfig.baseUrl} is required for exactly that reason.
+ * **CNCT runs at `app.doo.ooo`, and that is the default.** Until 0.2.0 the only deployment was a
+ * development box, so the host was required and had no default — a default then would have meant
+ * shipping to production against a dev box by forgetting to set something. There is a production host
+ * now, so leaving {@link CnctConfig.baseUrl} out means production, and anything else — a proxy on
+ * your own domain, a local server — is still one `baseUrl` away.
+ *
+ * Whether what you do is real is decided by the key, not the host: a sandbox key (`kaer_sk_test_…`)
+ * talks to the same production host and writes nothing real. See {@link CnctApiKey}.
  */
 export const CnctHosts = {
+  /** Production. What `baseUrl` is when you leave it out. */
+  production: 'https://app.doo.ooo',
   /**
-   * The current CNCT deployment. Expected to be replaced by a stable hostname; when that happens
-   * this constant changes and no call site does.
+   * @deprecated The development box this used to name no longer answers — CNCT runs at
+   * `app.doo.ooo`. Kept so code that referenced it still compiles, and pointed at production so it
+   * still works. Use {@link CnctHosts.production}, or leave `baseUrl` out.
    */
-  development: 'https://44-216-80-220.sslip.io',
+  development: 'https://app.doo.ooo',
 } as const;
 
 export type CnctLogLevel = 'debug' | 'info' | 'warning' | 'error';
@@ -29,13 +36,14 @@ export type CnctWebSocketFactory = (url: string) => WebSocket;
 
 export interface CnctConfigInput {
   /**
-   * The CNCT host, with an optional path prefix. **Required, with no default.**
+   * The CNCT host, with an optional path prefix. Defaults to {@link CnctHosts.production},
+   * `https://app.doo.ooo`.
    *
    * A prefix is honoured rather than stripped: a client fronting CNCT at
    * `https://theirdomain.com/support` is a legitimate arrangement, and every path this SDK builds is
    * appended to whatever is here. Accepts a string or a `URL`.
    */
-  baseUrl: string | URL;
+  baseUrl?: string | URL;
   /** How long to wait for an HTTP response before giving up with `timeout`. Default 20000. */
   connectTimeoutMs?: number;
   /**
@@ -104,8 +112,9 @@ export class CnctConfig {
   readonly fetch: CnctFetch;
   readonly webSocketFactory?: CnctWebSocketFactory;
 
-  constructor(input: CnctConfigInput) {
-    this.baseUrl = normaliseBaseUrl(input?.baseUrl);
+  constructor(input: CnctConfigInput = {}) {
+    // Absent means production. An empty string is not absent: it is a variable somebody meant to set.
+    this.baseUrl = normaliseBaseUrl(input.baseUrl ?? CnctHosts.production);
     this.connectTimeoutMs = input.connectTimeoutMs ?? 20000;
     this.sendTimeoutMs = input.sendTimeoutMs ?? 15000;
     this.headers = { ...(input.headers ?? {}) };
@@ -184,8 +193,8 @@ export class CnctConfig {
 export function normaliseBaseUrl(value: string | URL | undefined | null): string {
   if (value === undefined || value === null || value === '') {
     throw new CnctError(
-      'A CNCT host is required — there is no default. Pass baseUrl, e.g. ' +
-        `new Cnct({ baseUrl: CnctHosts.development }) or your own '${'https://cnct.example.com'}'.`,
+      `baseUrl is empty. Leave it out to use CNCT production (${CnctHosts.production}), or pass ` +
+        "your own host, e.g. 'https://cnct.example.com'.",
       CnctErrorCode.invalid,
     );
   }

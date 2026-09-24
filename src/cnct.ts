@@ -28,7 +28,7 @@ export type CnctModule = 'chat' | 'bookings' | 'tickets' | 'contacts';
  * lives.
  *
  * ```js
- * const cnct = new Cnct({ baseUrl: CnctHosts.development });
+ * const cnct = new Cnct(); // https://app.doo.ooo
  * const chat = cnct.chat('inbox-public-key');
  * ```
  *
@@ -43,7 +43,7 @@ export type CnctModule = 'chat' | 'bookings' | 'tickets' | 'contacts';
 export class Cnct {
   readonly config: CnctConfig;
 
-  constructor(input: CnctConfigInput | CnctConfig) {
+  constructor(input: CnctConfigInput | CnctConfig = {}) {
     this.config = input instanceof CnctConfig ? input : new CnctConfig(input);
   }
 
