@@ -13,11 +13,13 @@ The browser example loads the SDK straight from the CNCT host, so it needs nothi
 with your host and inbox key in the URL:
 
 ```
-examples/browser/index.html?host=https://your-cnct-host&inbox=your-public-key
+examples/browser/index.html?host=https://app.doo.ooo&inbox=your-public-key
 ```
 
-The Node ones take theirs from the environment:
+The Node ones take theirs from the environment. `CNCT_HOST` is optional — without it they go to
+`https://app.doo.ooo` — and a sandbox key (`kaer_sk_test_…`, from **Settings → Developers**) is the one
+to run the bookings example with: it books, cancels and texts nobody.
 
 ```bash
-CNCT_HOST=https://your-cnct-host CNCT_API_KEY=kaer_sk_… node examples/node/bookings.mjs
+CNCT_API_KEY=kaer_sk_test_… node examples/node/bookings.mjs
 ```

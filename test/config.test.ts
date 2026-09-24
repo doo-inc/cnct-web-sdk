@@ -2,10 +2,20 @@ import { describe, expect, it } from 'vitest';
 import { Cnct, CnctConfig, CnctError, CnctHosts } from '../src/index.js';
 
 describe('the host', () => {
-  it('is required, because a default is how somebody ships to a dev box by accident', () => {
-    // @ts-expect-error — the whole point is that this does not compile either.
-    expect(() => new CnctConfig({})).toThrow(CnctError);
-    expect(() => new CnctConfig({ baseUrl: '' })).toThrow(/host is required/i);
+  /**
+   * It was required until there was a production host to default to — a default then would have
+   * shipped apps to a dev box by accident. Now leaving it out means production.
+   */
+  it('is production when left out', () => {
+    expect(new CnctConfig().baseUrl).toBe('https://app.doo.ooo');
+    expect(new CnctConfig({}).baseUrl).toBe(CnctHosts.production);
+    expect(new Cnct().config.socketBaseUrl).toBe('wss://app.doo.ooo');
+  });
+
+  /** An empty string is not "left out": it is an environment variable somebody meant to set. */
+  it('refuses an empty one rather than quietly going to production', () => {
+    expect(() => new CnctConfig({ baseUrl: '' })).toThrow(CnctError);
+    expect(() => new CnctConfig({ baseUrl: '' })).toThrow(/baseUrl is empty/);
   });
 
   it('refuses anything that is not an absolute http(s) URL', () => {
@@ -40,8 +50,9 @@ describe('the host', () => {
     expect(config.baseUrl).toBe('https://cnct.example.com/support');
   });
 
-  it('names the current deployment rather than defaulting to it', () => {
-    expect(CnctHosts.development).toMatch(/^https:\/\//);
+  /** The old name still compiles, and goes where the old deployment's traffic went: production. */
+  it('keeps the deprecated development name working', () => {
+    expect(CnctHosts.development).toBe(CnctHosts.production);
     expect(() => new CnctConfig({ baseUrl: CnctHosts.development })).not.toThrow();
   });
 });
