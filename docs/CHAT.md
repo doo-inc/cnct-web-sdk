@@ -92,7 +92,7 @@ The credential is the `token` from session start, sent as `x-chat-token`. **Neve
 the rate limiter keys on `ip + authorization`, so a visitor who never sends that header falls through to
 their IP and cannot mint themselves a fresh budget by inventing one.
 
-The socket is `wss://your-cnct-host/ws/chat`. Send `{"type":"auth","token":"…"}` within five seconds or
+The socket is `wss://app.doo.ooo/ws/chat`. Send `{"type":"auth","token":"…"}` within five seconds or
 it closes. It answers `{"type":"authenticated","accepts":["ping","typing","send"]}` — read `accepts`
 rather than assuming.
 

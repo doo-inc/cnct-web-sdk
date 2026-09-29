@@ -13,9 +13,9 @@
  * `CnctConfig.baseUrl`, and swapping that is the only change needed to move between environments.
  *
  * ```js
- * import { Cnct, CnctHosts } from 'cnct-web-sdk';
+ * import { Cnct } from 'cnct-web-sdk';
  *
- * const cnct = new Cnct({ baseUrl: CnctHosts.development });
+ * const cnct = new Cnct(); // CnctHosts.production, https://app.doo.ooo
  * const chat = cnct.chat('the-inbox-public-key');
  * chat.on('change', render);
  * await chat.boot();
@@ -76,10 +76,10 @@ export interface CreateChatClientOptions {
   /** The inbox's public key. The whole tenant boundary lives on it. */
   publicKey: string;
   /**
-   * The CNCT host. **Required here, unlike in the copy served from the CNCT host itself** — see the
-   * note on this function.
+   * The CNCT host. Defaults to production, `https://app.doo.ooo` — not to the page's own origin, as
+   * the copy served from the CNCT host does. See the note on this function.
    */
-  baseUrl: string | URL;
+  baseUrl?: string | URL;
   /** Anything with getItem/setItem/removeItem, or a `CnctTokenStore`. Defaults to `localStorage`. */
   storage?: CnctTokenStore | StorageLike;
   storageKey?: string;
@@ -96,10 +96,11 @@ export interface CreateChatClientOptions {
  * Kept because every integration written against `/sdk/v1/cnct-chat.js` calls this, and renaming a
  * function is not worth an afternoon of somebody else's time.
  *
- * **One difference, and it is the point of the package: `baseUrl` is required.** The hosted copy at
- * `https://your-cnct-host/sdk/v1/cnct-chat.js` defaults it to the origin it was served from, which is
+ * **One difference: what `baseUrl` defaults to.** The hosted copy at
+ * `https://app.doo.ooo/sdk/v1/cnct-chat.js` defaults it to the origin it was served from, which is
  * right exactly because it was served from CNCT. Installed from npm and bundled into your own site,
- * that same default would point at *your* domain, where there is no CNCT — so it has to be said.
+ * that same default would point at *your* domain, where there is no CNCT — so the package defaults
+ * to CNCT production instead. (Before 0.2.0 there was no production host and it was required.)
  */
 export function createChatClient(options: CreateChatClientOptions): CnctChatClient {
   return new CnctChatClient({

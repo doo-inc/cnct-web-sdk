@@ -45,9 +45,10 @@ jobs:
           npm install /tmp/cnct-web-sdk-*.tgz
           node --input-type=module -e "
             import { Cnct, CnctHosts, CnctError } from 'cnct-web-sdk';
-            const chat = new Cnct({ baseUrl: CnctHosts.development }).chat('k');
+            const chat = new Cnct().chat('k');
             if (chat.state.status !== 'idle') throw new Error('unexpected initial state');
-            try { new Cnct({}); throw new Error('a missing host should have thrown'); }
+            if (new Cnct().config.baseUrl !== CnctHosts.production) throw new Error('the default host should be production');
+            try { new Cnct({ baseUrl: '' }); throw new Error('an empty host should have thrown'); }
             catch (error) { if (!(error instanceof CnctError)) throw error; }
             console.log('installed package works');
           "

@@ -10,7 +10,7 @@
   It is deliberately plain. The point of a headless SDK is that the interface is yours, so this shows
   the wiring rather than a design — about a hundred lines you would replace entirely.
 
-    index.html?host=https://your-cnct-host&inbox=your-inbox-public-key
+    index.html?host=https://app.doo.ooo&inbox=your-inbox-public-key
 -->
 
 <style>
@@ -148,11 +148,12 @@
 
 <script type="module">
   const params = new URLSearchParams(location.search);
-  const host = params.get('host');
+  // CNCT production unless the URL names another host — a local server, say.
+  const host = params.get('host') || 'https://app.doo.ooo';
   const inbox = params.get('inbox');
-  if (!host || !inbox) {
-    document.body.textContent = 'Add ?host=https://your-cnct-host&inbox=your-inbox-public-key';
-    throw new Error('missing host or inbox');
+  if (!inbox) {
+    document.body.textContent = 'Add ?inbox=your-inbox-public-key';
+    throw new Error('missing inbox');
   }
 
   // The hosted build defaults `baseUrl` to the origin it was served from — which is this host — so

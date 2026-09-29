@@ -59,7 +59,14 @@ export class CnctChatPublicKey extends CnctCredentials {
 }
 
 /**
- * A server-to-server API key, minted in the console under Integrations. Starts with `kaer_sk_`.
+ * A server-to-server API key, minted in the CNCT console under **Settings → Developers**. Starts with
+ * `kaer_sk_`.
+ *
+ * **There are two kinds, and the key says which.** `kaer_sk_test_…` is a **sandbox** key: it reads the
+ * account as it really is — services, people, hours, ticket types, what is free — but nothing it books,
+ * moves, cancels or raises is real. No customer is contacted and nothing appears in the business's
+ * calendar or queue, and every answer carries `sandbox: true`. `kaer_sk_live_…` is **production**, and
+ * so is every key minted before the two kinds existed (plain `kaer_sk_…`). Both go to the same host.
  *
  * **Do not ship this in a web page.** It is account-wide: it can read and write bookings and tickets
  * for every customer the account has, and a key in a bundle is a key every visitor has — View Source
@@ -76,8 +83,17 @@ export class CnctApiKey extends CnctCredentials {
    * greppable by the secret scanners that look for exactly this shape.
    */
   static readonly prefix = 'kaer_sk_';
+  /** A sandbox key: reads the real account, writes nothing real. */
+  static readonly sandboxPrefix = 'kaer_sk_test_';
+  /** A production key. Keys from before there were two kinds have neither segment, and are this. */
+  static readonly productionPrefix = 'kaer_sk_live_';
 
   readonly key: string;
+  /**
+   * Which kind of key this is, read from its prefix. The platform decides from its own records and
+   * this can only agree with it: a key is minted with its prefix and never changes kind.
+   */
+  readonly mode: 'sandbox' | 'production';
 
   constructor(key: string) {
     super();
@@ -92,6 +108,12 @@ export class CnctApiKey extends CnctCredentials {
       );
     }
     this.key = key.trim();
+    this.mode = this.key.startsWith(CnctApiKey.sandboxPrefix) ? 'sandbox' : 'production';
+  }
+
+  /** True for a `kaer_sk_test_` key, whose writes are kept apart and are not real. */
+  get isSandbox(): boolean {
+    return this.mode === 'sandbox';
   }
 
   override get headers(): Record<string, string> {

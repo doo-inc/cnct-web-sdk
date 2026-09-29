@@ -40,6 +40,8 @@ import type {
  */
 export class CnctAgentClient {
   readonly config: CnctConfig;
+  /** `sandbox` for a `kaer_sk_test_` key — see {@link CnctApiKey}. */
+  readonly mode: 'sandbox' | 'production';
   /** The calendar. */
   readonly bookings: CnctBookings;
   /** Tickets — the work a business hands to a colleague. */
@@ -61,6 +63,7 @@ export class CnctAgentClient {
         : new CnctApiKey(options.credentials);
     this.transport = options.transport ?? new CnctTransport(this.config);
     this.headers = credentials.headers;
+    this.mode = credentials.mode;
     this.bookings = new CnctBookings(this);
     this.tickets = new CnctTickets(this);
   }
@@ -69,15 +72,17 @@ export class CnctAgentClient {
    * What this account's credential may actually do, and the rules it must do it within.
    *
    * Filtered per account: an account without ticketing is not shown ticket tools. Read this rather
-   * than assuming — it is also the cheapest way to check a key works.
+   * than assuming — it is also the cheapest way to check a key works, and `sandbox` is the platform
+   * saying which kind of key it took this for.
    */
-  async catalogue(): Promise<{ tools: CnctTool[]; rules: CnctBookingRules }> {
+  async catalogue(): Promise<{ tools: CnctTool[]; rules: CnctBookingRules; sandbox: boolean }> {
     const body = expectObject(
       await this.transport.get('/api/booking-tools', { headers: this.headers }),
     );
     return {
       tools: asArray(body.tools).map(toTool),
       rules: toRules(isObject(body.rules) ? body.rules : {}),
+      sandbox: body.sandbox === true,
     };
   }
 
@@ -212,6 +217,7 @@ export class CnctBookings {
       name: optionalText(result.name),
       partySize: optionalNumber(result.partySize),
       resourceName: optionalText(result.with),
+      sandbox: result.sandbox === true,
     };
   }
 
@@ -311,7 +317,11 @@ export class CnctTickets {
         idempotencyKey: input.idempotencyKey,
       }),
     );
-    return { ticketNumber: numberOr(result.ticketNumber, 0), note: optionalText(result.note) };
+    return {
+      ticketNumber: numberOr(result.ticketNumber, 0),
+      note: optionalText(result.note),
+      sandbox: result.sandbox === true,
+    };
   }
 
   /**

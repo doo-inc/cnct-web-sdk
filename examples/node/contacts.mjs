@@ -1,16 +1,18 @@
 /**
  * Sign an operator in and page the directory.
  *
- *   CNCT_HOST=… CNCT_EMAIL=… CNCT_PASSWORD=… node examples/node/contacts.mjs [search]
+ *   CNCT_EMAIL=… CNCT_PASSWORD=… node examples/node/contacts.mjs [search]
+ *
+ * `CNCT_HOST` is optional; without it this goes to https://app.doo.ooo.
  */
 import { createInterface } from 'node:readline/promises';
 import { Cnct, CnctChooseOrganization, displayNameOf } from 'cnct-web-sdk';
 
-const host = process.env.CNCT_HOST;
+const host = process.env.CNCT_HOST || undefined;
 const email = process.env.CNCT_EMAIL;
 const password = process.env.CNCT_PASSWORD;
-if (!host || !email || !password) {
-  console.error('Set CNCT_HOST, CNCT_EMAIL and CNCT_PASSWORD.');
+if (!email || !password) {
+  console.error('Set CNCT_EMAIL and CNCT_PASSWORD.');
   process.exit(64);
 }
 

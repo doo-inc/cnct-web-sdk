@@ -6,14 +6,15 @@ the same code, and nothing about the protocol changed.
 
 ## If you load it from the CNCT host
 
-Nothing to do. `https://your-cnct-host/sdk/v1/cnct-chat.js` is still there, still serves one
+Nothing to do. `https://app.doo.ooo/sdk/v1/cnct-chat.js` is still there, still serves one
 dependency-free ES module, still defaults `baseUrl` to the origin it came from, and still exports
 `createChatClient` and `ChatError`. It is now built from this repository rather than edited in place —
 which is invisible from a page.
 
 ## If you vendored the file
 
-Install the package instead and **pass the host**, which is the one thing that changes:
+Install the package instead. The one thing that changes is what `baseUrl` defaults to: the package
+goes to CNCT production, `https://app.doo.ooo`, rather than to the origin it was loaded from.
 
 ```diff
 - import { createChatClient } from './vendor/cnct-chat.js';
@@ -21,12 +22,12 @@ Install the package instead and **pass the host**, which is the one thing that c
 
   const chat = createChatClient({
     publicKey: 'the-inbox-public-key',
-+   baseUrl: 'https://your-cnct-host',
   });
 ```
 
 Vendored, the old default resolved to _your_ origin, so anybody who vendored it was already passing
-`baseUrl` — in which case this is a one-line import change and nothing else.
+`baseUrl` — keep passing it if it names something other than `app.doo.ooo`, or drop it. Either way
+this is a one-line import change and nothing else. (0.1.x required `baseUrl`; 0.2.0 defaults it.)
 
 Everything else is unchanged: `boot`, `start`, `resume`, `send`, `retry`, `typing`, `end`, `connect`,
 `disconnect`, `on`, `state`, `hasSession`, the event names, the error codes, and the shape of every
@@ -35,7 +36,7 @@ object. `ChatError` is still exported under that name.
 ## What is new
 
 - **`Cnct`**, the entry point that holds the host once and hands out clients:
-  `new Cnct({ baseUrl }).chat(publicKey)`. `createChatClient` still works and is not going anywhere.
+  `new Cnct().chat(publicKey)`. `createChatClient` still works and is not going anywhere.
 - **Bookings, tickets and contacts**, on the other two credentials. See the
   [README](../README.md#three-credentials-three-doors).
 - **Types**, generated from the source rather than hand-written beside it. `cnct-chat.d.ts` was a copy

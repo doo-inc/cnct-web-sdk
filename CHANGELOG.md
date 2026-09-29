@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.2.0
+
+- **The host defaults to production, `https://app.doo.ooo`.** `baseUrl` is optional on `Cnct`,
+  `CnctConfig` and `createChatClient`; `new Cnct()` is enough. It was required in 0.1.x because the only
+  deployment was a development box. Passing a `baseUrl` works exactly as before, and an empty string is
+  still refused — it is a variable somebody meant to set.
+- **`CnctHosts.production`**. `CnctHosts.development` is deprecated: the box it named no longer answers,
+  and it now points at production so code that used it still compiles and still works.
+- **Sandbox keys.** A `kaer_sk_test_…` key reads the account as it really is and writes nothing real —
+  see the README's _Sandbox and production_. `CnctApiKey` has `mode` and `isSandbox`,
+  `CnctAgentClient` has `mode`, and `catalogue()`, a booking confirmation and a raised ticket each carry
+  `sandbox`. Production keys are `kaer_sk_live_…`; keys minted before are plain `kaer_sk_…` and are
+  production. All three still start `kaer_sk_`, so 0.1.x accepts the new keys unchanged.
+- Keys are minted by the account's owner or an admin in the CNCT console, under **Settings →
+  Developers**.
+
 ## 0.1.1
 
 - **A disconnect during the handshake no longer throws in Node.** `ws` raises an 'error' event where

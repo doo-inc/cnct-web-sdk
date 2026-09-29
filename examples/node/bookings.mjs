@@ -5,18 +5,24 @@
  * bundle is a key every visitor has. The shape this demonstrates is the one to copy — your page calls
  * your server, your server holds the key.
  *
- *   CNCT_HOST=https://your-cnct-host CNCT_API_KEY=kaer_sk_… node examples/node/bookings.mjs
+ *   CNCT_API_KEY=kaer_sk_test_… node examples/node/bookings.mjs
+ *
+ * Run it with a sandbox key (`kaer_sk_test_…`) and nothing it books is real. `CNCT_HOST` is optional;
+ * without it this goes to https://app.doo.ooo.
  */
 import { Cnct, CnctApiKey, CnctError } from 'cnct-web-sdk';
 
-const host = process.env.CNCT_HOST;
+const host = process.env.CNCT_HOST || undefined;
 const key = process.env.CNCT_API_KEY;
-if (!host || !key) {
-  console.error('Set CNCT_HOST and CNCT_API_KEY.');
+if (!key) {
+  console.error('Set CNCT_API_KEY — a sandbox key (kaer_sk_test_…) from Settings → Developers.');
   process.exit(64);
 }
 
 const agent = new Cnct({ baseUrl: host }).agent(new CnctApiKey(key));
+console.log(
+  agent.mode === 'sandbox' ? 'Sandbox: nothing here is real.' : 'PRODUCTION: this is real.',
+);
 
 // Crash here rather than in production if this ever gets bundled into something with a DOM.
 new CnctApiKey(key).assertNotInBrowser?.();

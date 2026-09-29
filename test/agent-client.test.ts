@@ -29,6 +29,50 @@ describe('the credential', () => {
   it('redacts itself for a log', () => {
     expect(new CnctApiKey('kaer_sk_abcdefgh').redacted).toBe('apiKey:…efgh');
   });
+
+  /**
+   * Keys minted before there were two kinds have neither segment and are production — the platform
+   * says so, and this has to agree or an old key would read as something it is not.
+   */
+  it('reads which kind it is from its prefix', () => {
+    expect(new CnctApiKey('kaer_sk_test_abc').mode).toBe('sandbox');
+    expect(new CnctApiKey('kaer_sk_test_abc').isSandbox).toBe(true);
+    expect(new CnctApiKey('kaer_sk_live_abc').mode).toBe('production');
+    expect(new CnctApiKey('kaer_sk_mintedbeforemodes').mode).toBe('production');
+  });
+});
+
+describe('a sandbox key', () => {
+  const sandboxFor = (server: MockCnct) =>
+    new Cnct({ baseUrl: server.baseUrl }).agent(new CnctApiKey('kaer_sk_test_sandbox'));
+
+  it('says so on the agent, in the catalogue, and on everything it makes', async () => {
+    const agent = sandboxFor(cnct);
+    expect(agent.mode).toBe('sandbox');
+    expect((await agent.catalogue()).sandbox).toBe(true);
+    const booking = await agent.bookings.create({
+      startsAt: '2026-09-20T16:30:00.000Z',
+      customerPhone: '+97312345678',
+    });
+    expect(booking.sandbox).toBe(true);
+    const ticket = await agent.tickets.create({
+      ticketTypeId: 'tt_1',
+      title: 'Leaking tap',
+      reasonUnresolved: 'Needs a plumber',
+    });
+    expect(ticket.sandbox).toBe(true);
+  });
+
+  it('is not what a production key gets back', async () => {
+    const agent = agentFor(cnct);
+    expect(agent.mode).toBe('production');
+    expect((await agent.catalogue()).sandbox).toBe(false);
+    const booking = await agent.bookings.create({
+      startsAt: '2026-09-20T16:30:00.000Z',
+      customerPhone: '+97312345678',
+    });
+    expect(booking.sandbox).toBe(false);
+  });
 });
 
 describe('the catalogue', () => {

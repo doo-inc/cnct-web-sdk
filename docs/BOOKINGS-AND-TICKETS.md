@@ -4,13 +4,36 @@ On a `kaer_sk_` API key, which is account-wide. **Keep it on a server.** Everyth
 writes on behalf of the whole account, and the customer each call is about is named by phone number
 rather than inferred from a session. A page that held this key could book for, and cancel for, anybody.
 
+The account's owner or an admin mints keys in the CNCT console, under **Settings → Developers**. Start
+with a **sandbox** key (`kaer_sk_test_…`) — see [the sandbox](#the-sandbox) below.
+
 ```js
 import { Cnct, CnctApiKey } from 'cnct-web-sdk';
 
-const agent = new Cnct({ baseUrl: process.env.CNCT_HOST }).agent(
-  new CnctApiKey(process.env.CNCT_API_KEY),
-);
+// https://app.doo.ooo unless you pass another baseUrl.
+const agent = new Cnct().agent(new CnctApiKey(process.env.CNCT_API_KEY));
 ```
+
+## The sandbox
+
+A sandbox key runs every call on this page exactly as production does — the same tools, the same
+checks, the same refusals, against the account's real services, people, hours and ticket types — and
+keeps what it writes in the account's sandbox instead of its calendar and queue.
+
+- **Nothing it writes is real.** No slot is taken, no customer is texted, looked up or created, and
+  nothing appears in the business's calendar, ticket queue, reports or activity log.
+- **Everything it writes can be found again**, so the whole round trip is testable: `create` →
+  `forCustomer` → `reschedule` → `cancel`, and `tickets.create` → `tickets.forCustomer`. Sandbox
+  tickets are numbered from 1, and a retry with the same `idempotencyKey` returns the same one.
+- **It can only find its own.** `forCustomer` on a sandbox key never returns a real customer's bookings
+  or tickets, whatever number you give it.
+- **Every answer says so**: `sandbox: true` on the booking and the ticket, and on `catalogue()`.
+  `key.mode` and `agent.mode` say which kind of key you hold before you send anything.
+
+One gap, on purpose: **a sandbox booking does not take its slot**, because availability is the real
+calendar's. Booking the same time twice succeeds in sandbox and would not in production.
+
+Going live is changing the key. The host is the same.
 
 ## Start with the catalogue
 
