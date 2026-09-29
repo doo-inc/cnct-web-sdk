@@ -1,13 +1,12 @@
 /**
  * The official CNCT SDK for browsers and Node.
  *
- * Three credentials, three doors, and nothing in here renders anything:
+ * Two credentials, two doors, and nothing in here renders anything:
  *
  * | Credential           | Opens                   | Where it belongs                                |
  * | -------------------- | ----------------------- | ----------------------------------------------- |
  * | `CnctChatPublicKey`  | Live chat, as a visitor | In your bundle. It is already public.           |
  * | `CnctApiKey`         | Bookings and tickets    | On a server you control. Account-wide.          |
- * | `CnctOperatorToken`  | The contact directory   | A staff app, from a person's own login.         |
  *
  * Start with {@link Cnct}, or construct a client directly. Everything points at the host in
  * `CnctConfig.baseUrl`, and swapping that is the only change needed to move between environments.
@@ -34,12 +33,7 @@ export {
   type CnctLogLevel,
   type CnctWebSocketFactory,
 } from './config.js';
-export {
-  CnctApiKey,
-  CnctChatPublicKey,
-  CnctCredentials,
-  CnctOperatorToken,
-} from './credentials.js';
+export { CnctApiKey, CnctChatPublicKey, CnctCredentials } from './credentials.js';
 export { ChatError, CnctError, CnctErrorCode, type CnctErrorCodeValue } from './errors.js';
 export { CnctTransport, type RequestOptions } from './transport.js';
 export {
@@ -58,15 +52,6 @@ export type * from './chat/types.js';
 
 export { CnctAgentClient, CnctBookings, CnctTickets } from './agent/agent-client.js';
 export type * from './agent/types.js';
-
-export { CnctContactConflict, CnctContactsClient } from './contacts/contacts-client.js';
-export {
-  CnctChooseOrganization,
-  CnctOperatorAuth,
-  type CnctOperatorSession,
-} from './contacts/operator-auth.js';
-export { displayNameOf } from './contacts/types.js';
-export type * from './contacts/types.js';
 
 import { CnctChatClient } from './chat/chat-client.js';
 import type { CnctConfigInput } from './config.js';

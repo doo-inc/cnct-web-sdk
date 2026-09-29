@@ -12,6 +12,8 @@ import type {
   CnctRaisedTicket,
   CnctService,
   CnctSlot,
+  CnctTicketDetail,
+  CnctTicketFollowUp,
   CnctTicketSummary,
   CnctTicketType,
   CnctTicketTypeDetail,
@@ -76,9 +78,7 @@ export class CnctAgentClient {
    * saying which kind of key it took this for.
    */
   async catalogue(): Promise<{ tools: CnctTool[]; rules: CnctBookingRules; sandbox: boolean }> {
-    const body = expectObject(
-      await this.transport.get('/api/booking-tools', { headers: this.headers }),
-    );
+    const body = expectObject(await this.transport.get('/api/tools', { headers: this.headers }));
     return {
       tools: asArray(body.tools).map(toTool),
       rules: toRules(isObject(body.rules) ? body.rules : {}),
@@ -96,7 +96,7 @@ export class CnctAgentClient {
    */
   async call(tool: string, args: Record<string, unknown> = {}): Promise<Record<string, unknown>> {
     return expectObject(
-      await this.transport.post(`/api/booking-tools/${encodeURIComponent(tool)}`, {
+      await this.transport.post(`/api/tools/${encodeURIComponent(tool)}`, {
         body: args,
         headers: this.headers,
       }),
@@ -325,12 +325,77 @@ export class CnctTickets {
   }
 
   /**
-   * One customer's open tickets, found by their number. Never describe a ticket to anybody but the
+   * One customer's tickets, found by their number — open ones unless `includeResolved`. Narrow with
+   * `q` (a word from what it is about) or `ticketNumber`. Never describe a ticket to anybody but the
    * person it belongs to.
    */
-  async forCustomer(customerPhone: string): Promise<CnctListing<CnctTicketSummary>> {
-    const result = await this.client.call('find_my_tickets', { customerPhone });
+  async forCustomer(
+    customerPhone: string,
+    options: { q?: string; ticketNumber?: number; includeResolved?: boolean } = {},
+  ): Promise<CnctListing<CnctTicketSummary>> {
+    const result = await this.client.call(
+      'find_my_tickets',
+      compact({
+        customerPhone,
+        q: options.q,
+        ticketNumber: options.ticketNumber,
+        includeResolved: options.includeResolved,
+      }),
+    );
     return listing(result, 'tickets', toTicketSummary);
+  }
+
+  /**
+   * One of this customer's tickets in detail, as the customer may see it: its status, whether it is
+   * waiting on them, what they asked for, the details on it and what has happened so far.
+   *
+   * There are no names in it — not who is handling it, not who moved it — and none of the notes the
+   * team writes for each other. Somebody else's ticket number is refused exactly as a number that
+   * does not exist is, so this cannot be used to find out whether a ticket exists.
+   *
+   * Needs a CNCT host from 2026-09-29 or later (it serves `get_ticket`).
+   */
+  async get(customerPhone: string, ticketNumber: number): Promise<CnctTicketDetail> {
+    const result = await this.client.callOrThrow('get_ticket', { customerPhone, ticketNumber });
+    return {
+      ticketNumber: numberOr(result.ticketNumber, ticketNumber),
+      title: text(result.title),
+      kind: optionalText(result.kind),
+      status: text(result.status),
+      waitingOnCustomer: result.waitingOnCustomer === true,
+      raised: optionalText(result.raised),
+      resolved: optionalText(result.resolved),
+      closed: optionalText(result.closed),
+      customerRequest: optionalText(result.customerRequest),
+      desiredOutcome: optionalText(result.desiredOutcome),
+      details: asArray(result.details).map((row) => ({ name: text(row.name), value: row.value })),
+      history: asArray(result.history).map((row) => ({ on: text(row.on), what: text(row.what) })),
+      note: optionalText(result.note),
+    };
+  }
+
+  /**
+   * Pass something the customer said on to whoever is handling one of their open tickets — new
+   * information, an answer to a question, "it got worse". **Use this rather than {@link create}** when
+   * they are following up on something already open: a second ticket splits the story in two.
+   *
+   * If the ticket was waiting on the customer, this starts it moving again (`resumed: true`). A
+   * resolved, closed or cancelled ticket refuses — raise a new one that mentions the old number. The
+   * same words sent twice within ten minutes are kept once, so a retry is safe.
+   *
+   * Needs a CNCT host from 2026-09-29 or later (it serves `add_to_ticket`).
+   */
+  async addTo(input: {
+    customerPhone: string;
+    ticketNumber: number;
+    note: string;
+  }): Promise<CnctTicketFollowUp> {
+    const result = await this.client.callOrThrow('add_to_ticket', { ...input });
+    return {
+      ticketNumber: numberOr(result.ticketNumber, input.ticketNumber),
+      resumed: result.resumed === true,
+      note: optionalText(result.note),
+    };
   }
 }
 
@@ -377,7 +442,7 @@ function toService(raw: Record<string, unknown>): CnctService {
   };
 }
 
-/** The same thing under the keys `GET /api/booking-tools` uses for it. */
+/** The same thing under the keys `GET /api/tools` uses for it. */
 function toServiceFromRules(raw: Record<string, unknown>): CnctService {
   return {
     serviceId: text(raw.id) || text(raw.serviceId),
