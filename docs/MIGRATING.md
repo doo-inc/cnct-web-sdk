@@ -37,8 +37,7 @@ object. `ChatError` is still exported under that name.
 
 - **`Cnct`**, the entry point that holds the host once and hands out clients:
   `new Cnct().chat(publicKey)`. `createChatClient` still works and is not going anywhere.
-- **Bookings, tickets and contacts**, on the other two credentials. See the
-  [README](../README.md#three-credentials-three-doors).
+- **Bookings and tickets**, on an API key. See the [README](../README.md#two-credentials-two-doors).
 - **Types**, generated from the source rather than hand-written beside it. `cnct-chat.d.ts` was a copy
   that could drift; these cannot.
 - **`fetchAttachment`**, because a file an operator sent needs the session token on a header and
@@ -56,3 +55,36 @@ as before.
 The one case that differs is a **custom async token store** on the very first send of a session, where
 the client has to wait to learn whether it has a token at all. Await `chat.ready` once at startup if that
 matters to you.
+
+---
+
+# From 0.1.x to 0.2.0
+
+## The operator token and contacts are gone
+
+`CnctOperatorToken`, `CnctContactsClient`, `CnctOperatorAuth`, `cnct.contacts(…)`, `cnct.auth`,
+`displayNameOf` and the contact types are removed. They signed a staff member in with their own
+password and used that eight-hour session as an integration credential — which put a person's login
+into somebody's server config, carrying whatever that person's role allowed, and ending the day they
+left. An integration's credential should belong to the integration.
+
+What replaces them depends on what you used them for:
+
+- **Looking up a customer's bookings or tickets** — an API key already does this, by phone number:
+  `agent.bookings.forCustomer(phone)`, `agent.tickets.forCustomer(phone)` and `agent.tickets.get(…)`.
+- **Anything else in the contact directory** — there is no key-based surface for it yet. Tell us what
+  you need, rather than keeping a staff login in a config file.
+
+`Cnct.modulesFor` no longer answers `'contacts'`, and `CnctModule` no longer includes it.
+
+## `/api/tools` instead of `/api/booking-tools`
+
+`CnctAgentClient` now calls `/api/tools`. CNCT serves both addresses, so nothing changes for you
+unless you run CNCT yourself on a build from before 2026-09-29 — in that case, upgrade it first.
+
+## New
+
+- `agent.tickets.get(phone, ticketNumber)` and `agent.tickets.addTo({ … })`. See
+  [BOOKINGS-AND-TICKETS.md](BOOKINGS-AND-TICKETS.md#when-the-customer-comes-back).
+- `agent.tickets.forCustomer(phone, { q, ticketNumber, includeResolved })` — the options the platform
+  always took and 0.1.x never passed.

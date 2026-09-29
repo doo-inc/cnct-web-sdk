@@ -115,6 +115,51 @@ const raised = await agent.tickets.create({
 
 `idempotencyKey` is worth sending. Omit it and every call raises a new ticket.
 
+### When the customer comes back
+
+Most of what happens to a ticket after it is raised is the customer asking about it, or telling you
+something new. Three methods cover that, and all three are scoped to the customer's own number — a
+ticket number on its own reads nothing.
+
+| Method                                                     |                                                                                          |
+| ---------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| `forCustomer(phone, { q, ticketNumber, includeResolved })` | Their tickets — open ones unless `includeResolved`. `q` is a word from what it is about. |
+| `get(phone, ticketNumber)`                                 | One of them in detail, as the customer may see it.                                       |
+| `addTo({ customerPhone, ticketNumber, note })`             | Pass something they said on to whoever is handling it.                                   |
+
+```js
+const ticket = await agent.tickets.get('+97312345678', 1042);
+if (ticket.waitingOnCustomer) {
+  // Ask them what is needed, then:
+  const added = await agent.tickets.addTo({
+    customerPhone: '+97312345678',
+    ticketNumber: 1042,
+    note: 'Order number is A-1042; the payment went out on the 3rd',
+  });
+  added.resumed; // true: it was waiting on them, and is being worked on again
+}
+```
+
+**What `get` leaves out is the point.** Status, whether it is waiting on them, what they asked for, the
+ticket type's own fields by their display names, and a dated history in plain words — "Raised",
+"Being worked on", "Waiting on the customer", "The customer added: …". No person's name on any line, no
+team, and none of the notes staff write for each other. Somebody else's ticket number is refused in
+exactly the words a number that does not exist is, so it cannot be used to probe.
+
+**`addTo` instead of a second ticket.** A customer following up on something already open belongs on
+that ticket; a new one splits the story in two and leaves somebody working half of it. What it does:
+
+- It lands in the ticket's history for the team, as the customer's words.
+- If the ticket was waiting on the customer, it goes back to being worked on — `resumed: true` — so
+  the business's own deadline is not left paused on an answer that has arrived.
+- A resolved, closed or cancelled ticket refuses (`tool_refused`), and the refusal says to raise a new
+  one that mentions the old number. Reopening a finished ticket is the business's call, not yours.
+- The same words sent twice within ten minutes are kept once, so retrying after a timeout is safe.
+
+In sandbox, both run the same checks against the sandbox's own tickets and `addTo` keeps nothing.
+
+Both need a CNCT host from 2026-09-29 or later. `app.doo.ooo` is one.
+
 ## Refusals are not failures
 
 A tool that declines answers `200` with an `error` sentence — the slot went, the number is not on file,

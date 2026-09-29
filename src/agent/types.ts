@@ -148,13 +148,60 @@ export interface CnctRaisedTicket {
   sandbox: boolean;
 }
 
-/** One of a customer's open tickets. */
+/** One of a customer's tickets. */
 export interface CnctTicketSummary {
   ticketNumber: number;
   title: string;
   status: string;
   /** The date it was raised, `YYYY-MM-DD`. */
   raised: string | null;
+}
+
+/** One line of a ticket's story, in words a customer can be told. Never who did it. */
+export interface CnctTicketMilestone {
+  /** `YYYY-MM-DD`. */
+  on: string;
+  /** "Raised", "Being worked on", "Waiting on the customer", "The customer added: …". */
+  what: string;
+}
+
+/**
+ * One of a customer's tickets, as the customer may see it.
+ *
+ * What is missing is deliberate: no person's name anywhere, no team, and none of the notes a business
+ * writes for its own staff. It is safe to show to the customer it belongs to — and only to them.
+ */
+export interface CnctTicketDetail {
+  ticketNumber: number;
+  title: string;
+  /** The kind of work, by the business's own name for it. */
+  kind: string | null;
+  /** `OPEN`, `IN_PROGRESS`, `WAITING`, `RESOLVED`, `CLOSED` or `CANCELLED`. */
+  status: string;
+  /**
+   * True when the business is waiting on the customer — for an answer, a photo, a time. Ask them what
+   * is needed and pass it on with `addTo`, which starts the ticket moving again.
+   */
+  waitingOnCustomer: boolean;
+  /** `YYYY-MM-DD`. */
+  raised: string | null;
+  resolved: string | null;
+  closed: string | null;
+  customerRequest: string | null;
+  desiredOutcome: string | null;
+  /** The ticket type's own fields, labelled by their display names. */
+  details: { name: string; value: unknown }[];
+  history: CnctTicketMilestone[];
+  /** How to talk about it — worth following, it is written for exactly that. */
+  note: string | null;
+}
+
+/** What happened to a follow-up passed on with `addTo`. */
+export interface CnctTicketFollowUp {
+  ticketNumber: number;
+  /** True when the ticket was waiting on the customer and is now being worked on again. */
+  resumed: boolean;
+  note: string | null;
 }
 
 /**

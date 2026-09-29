@@ -82,9 +82,8 @@ export const CnctErrorCode = {
   /** The conversation has ended. Start a new one; it cannot be reopened from this side. */
   conversationClosed: 'conversation_closed',
   /**
-   * The request collided with something that already exists or has already moved on: a contact with
-   * that number, a slot somebody else took, an operator with seats in more than one account. Never a
-   * reason to retry unchanged — the answer will be the same.
+   * The request collided with something that already exists or has already moved on — a slot
+   * somebody else took, say. Never a reason to retry unchanged — the answer will be the same.
    */
   conflict: 'conflict',
   /** The session token now points at a different conversation than the one being written to. */

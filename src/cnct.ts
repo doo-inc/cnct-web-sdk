@@ -1,24 +1,17 @@
 import { CnctAgentClient } from './agent/agent-client.js';
 import { CnctChatClient, type CnctChatClientOptions } from './chat/chat-client.js';
 import { CnctConfig, type CnctConfigInput } from './config.js';
-import { CnctContactsClient } from './contacts/contacts-client.js';
-import { CnctOperatorAuth } from './contacts/operator-auth.js';
-import {
-  CnctApiKey,
-  CnctChatPublicKey,
-  type CnctCredentials,
-  CnctOperatorToken,
-} from './credentials.js';
+import { CnctApiKey, CnctChatPublicKey, type CnctCredentials } from './credentials.js';
 import { CnctError, CnctErrorCode } from './errors.js';
 
 /**
  * A part of CNCT a credential can open.
  *
- * Not decoration: the three credentials are genuinely different keys to different doors, and an app
+ * Not decoration: the two credentials are genuinely different keys to different doors, and an app
  * that asks {@link Cnct.modulesFor} what it holds can hide the tabs it cannot serve instead of finding
  * out with a 401 in front of a customer.
  */
-export type CnctModule = 'chat' | 'bookings' | 'tickets' | 'contacts';
+export type CnctModule = 'chat' | 'bookings' | 'tickets';
 
 /**
  * The entry point. Holds the {@link CnctConfig} and hands out the clients a credential opens.
@@ -58,10 +51,8 @@ export class Cnct {
   }
 
   /**
-   * What a credential opens.
-   *
-   * Contacts are absent from every list but the operator's, and that is the platform's boundary rather
-   * than this SDK's: there is no contacts surface on an API key today.
+   * What a credential opens. Tickets also need the account to hold ticketing — ask
+   * {@link CnctAgentClient.catalogue} for what a particular account actually offers.
    */
   static modulesFor(credentials: CnctCredentials): CnctModule[] {
     switch (credentials.kind) {
@@ -69,8 +60,6 @@ export class Cnct {
         return ['chat'];
       case 'apiKey':
         return ['bookings', 'tickets'];
-      case 'operatorToken':
-        return ['contacts'];
       default:
         return [];
     }
@@ -94,28 +83,17 @@ export class Cnct {
     return new CnctAgentClient({ config: this.config, credentials });
   }
 
-  /** The contact directory, on an operator's console session. */
-  contacts(credentials: CnctOperatorToken | string): CnctContactsClient {
-    return new CnctContactsClient({ config: this.config, credentials });
-  }
-
-  /** Signing an operator in, to get the token {@link contacts} needs. */
-  get auth(): CnctOperatorAuth {
-    return new CnctOperatorAuth({ config: this.config });
-  }
-
   /**
    * The client for a credential, whatever kind it is.
    *
-   * For an app that is handed one of the three and has to work out what it can do — a settings screen
+   * For an app that is handed one of the two and has to work out what it can do — a settings screen
    * where somebody pastes whatever CNCT gave them, say.
    */
-  clientFor(credentials: CnctCredentials): CnctChatClient | CnctAgentClient | CnctContactsClient {
+  clientFor(credentials: CnctCredentials): CnctChatClient | CnctAgentClient {
     if (credentials instanceof CnctChatPublicKey) return this.chat(credentials);
     if (credentials instanceof CnctApiKey) return this.agent(credentials);
-    if (credentials instanceof CnctOperatorToken) return this.contacts(credentials);
     throw new CnctError(
-      'That is not a CNCT credential. Wrap it in CnctChatPublicKey, CnctApiKey or CnctOperatorToken.',
+      'That is not a CNCT credential. Wrap it in CnctChatPublicKey or CnctApiKey.',
       CnctErrorCode.missingCredential,
     );
   }

@@ -15,6 +15,18 @@
   production. All three still start `kaer_sk_`, so 0.1.x accepts the new keys unchanged.
 - Keys are minted by the account's owner or an admin in the CNCT console, under **Settings →
   Developers**.
+- **Following up on a ticket.** `agent.tickets.get(phone, ticketNumber)` reads one of a customer's
+  tickets as they may see it — status, whether it waits on them, their request, its fields and a plain
+  history, with no names and no staff notes. `agent.tickets.addTo({ customerPhone, ticketNumber, note })`
+  passes their follow-up on to the open ticket instead of raising a second one, and starts a ticket that
+  was waiting on them moving again. Both need a CNCT host from 2026-09-29 on.
+- `agent.tickets.forCustomer(phone, { q, ticketNumber, includeResolved })` passes the options the
+  platform always accepted.
+- **The agent client calls `/api/tools`.** CNCT still answers the old `/api/booking-tools`.
+- **Breaking: the operator token and contacts are removed** — `CnctOperatorToken`,
+  `CnctContactsClient`, `CnctOperatorAuth`, `cnct.contacts`, `cnct.auth`, `displayNameOf` and the
+  contact types. A staff member's login is not an integration credential. See
+  [docs/MIGRATING.md](docs/MIGRATING.md#from-01x-to-020).
 
 ## 0.1.1
 

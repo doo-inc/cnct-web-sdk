@@ -125,7 +125,9 @@ export async function startMockCnct(options: { prefix?: string } = {}): Promise<
     // ── Bookings and tickets ───────────────────────────────────────────────────────────────────
     // Two keys, as the platform has two kinds: a sandbox key's every answer says `sandbox: true`.
     const sandbox = AGENT_KEYS[String(request.headers.authorization)];
-    if (request.method === 'GET' && path === '/api/booking-tools') {
+    // Only `/api/tools`: the platform still answers `/api/booking-tools` too, but this SDK must not
+    // be the thing that keeps the old address alive, so here it 404s.
+    if (request.method === 'GET' && path === '/api/tools') {
       if (sandbox === undefined) return json(response, 401, { error: 'Unauthenticated' });
       return json(response, 200, {
         sandbox,
@@ -142,76 +144,12 @@ export async function startMockCnct(options: { prefix?: string } = {}): Promise<
         },
       });
     }
-    if (request.method === 'POST' && path.startsWith('/api/booking-tools/')) {
+    if (request.method === 'POST' && path.startsWith('/api/tools/')) {
       if (sandbox === undefined) return json(response, 401, { error: 'Unauthenticated' });
-      const tool = decodeURIComponent(path.slice('/api/booking-tools/'.length));
+      const tool = decodeURIComponent(path.slice('/api/tools/'.length));
       const result = toolResult(tool, body as Record<string, unknown>);
       return json(response, 200, sandbox ? { ...result, sandbox: true } : result);
     }
-
-    // ── Auth and contacts ──────────────────────────────────────────────────────────────────────
-    if (request.method === 'POST' && path === '/api/auth/login') {
-      const input = body as { email: string; password: string; organizationSlug?: string };
-      if (input.password !== 'correct') return json(response, 401, { error: 'Wrong.' });
-      if (input.email === 'mfa@example.com')
-        return json(response, 200, {
-          mfaRequired: true,
-          mfaToken: 'mfa-token',
-          mfaMethod: 'EMAIL',
-        });
-      if (input.email === 'two@example.com' && !input.organizationSlug)
-        return json(response, 409, {
-          error: 'Choose an account.',
-          organizations: [
-            { slug: 'doo', name: 'DOO' },
-            { slug: 'qimam', name: 'Qimam' },
-          ],
-        });
-      return json(response, 200, session());
-    }
-    if (request.method === 'POST' && path === '/api/auth/mfa/verify')
-      return json(response, 200, session());
-    if (request.method === 'GET' && path === '/api/auth/me') {
-      if (request.headers.authorization !== 'Bearer op-token')
-        return json(response, 401, { error: 'Unauthenticated' });
-      return json(response, 200, { user: user(), organization: { name: 'DOO' } });
-    }
-    if (request.method === 'GET' && path === '/api/tags') {
-      return json(response, 200, [{ id: 'tag_1', name: 'VIP', color: '#b52d93', contactCount: 3 }]);
-    }
-    if (request.method === 'GET' && path === '/api/contacts') {
-      const cursor = url.searchParams.get('cursor');
-      if (cursor === 'page2')
-        return json(response, 200, {
-          contacts: [contact('c_2', 'Ahmed')],
-          total: 2,
-          nextCursor: null,
-        });
-      return json(response, 200, {
-        contacts: [contact('c_1', 'Layla')],
-        total: 2,
-        nextCursor: 'page2',
-      });
-    }
-    if (request.method === 'POST' && path === '/api/contacts') {
-      const input = body as { phoneNumber?: string; name?: string };
-      if (input.phoneNumber === '+97300000000')
-        return json(response, 409, {
-          error: 'That number already belongs to somebody.',
-          contact: { id: 'c_9', name: 'Existing Person' },
-        });
-      return json(response, 200, contact('c_new', input.name ?? null, input.phoneNumber ?? null));
-    }
-    if (request.method === 'PATCH' && path.startsWith('/api/contacts/'))
-      return json(response, 200, contact('c_1', (body as { name?: string })?.name ?? 'Layla'));
-    if (request.method === 'POST' && path.endsWith('/merge'))
-      return json(response, 200, { contact: contact('c_1', 'Layla') });
-    if (request.method === 'POST' && path.endsWith('/tags'))
-      return json(response, 200, contact('c_1', 'Layla'));
-    if (request.method === 'DELETE' && path.includes('/tags/'))
-      return json(response, 200, contact('c_1', 'Layla'));
-    if (request.method === 'GET' && /^\/api\/contacts\/[^/]+$/.test(path))
-      return json(response, 200, contact('c_1', 'Layla'));
 
     return json(response, 404, { error: 'Not found' });
   }
@@ -347,35 +285,39 @@ function toolResult(tool: string, args: Record<string, unknown>): Record<string,
           },
         ],
       };
+    case 'get_ticket':
+      if (args.ticketNumber !== 1042)
+        return { error: `No ticket #${String(args.ticketNumber)} belongs to them.` };
+      return {
+        ticketNumber: 1042,
+        title: 'Refund not received',
+        kind: 'Refund',
+        status: 'WAITING',
+        waitingOnCustomer: true,
+        raised: '2026-09-18',
+        resolved: null,
+        closed: null,
+        customerRequest: 'My money back for order 881',
+        desiredOutcome: null,
+        details: [{ name: 'Order number', value: '881' }],
+        history: [
+          { on: '2026-09-18', what: 'Raised' },
+          { on: '2026-09-19', what: 'Waiting on the customer' },
+        ],
+        note: 'This is waiting on the customer.',
+      };
+    case 'add_to_ticket':
+      if (args.ticketNumber === 7)
+        return { error: 'Not added. #7 is resolved, so nobody is working on it any more.' };
+      return {
+        ok: true,
+        ticketNumber: args.ticketNumber,
+        resumed: args.ticketNumber === 1042,
+        note: 'Added.',
+      };
     default:
       return { error: `Unknown tool ${tool}` };
   }
-}
-
-function session() {
-  return { token: 'op-token', user: user(), organization: { name: 'DOO' } };
-}
-
-function user() {
-  return { id: 'u_1', email: 'operator@example.com', role: 'OWNER', mustChangePassword: false };
-}
-
-function contact(id: string, name: string | null, phoneNumber: string | null = '+97312345678') {
-  return {
-    id,
-    name,
-    phoneNumber,
-    email: null,
-    identifier: null,
-    company: null,
-    notes: null,
-    blocked: false,
-    optedOutAt: null,
-    tags: [{ tag: { id: 'tag_1', name: 'VIP', color: '#b52d93' } }],
-    customAttributes: { plan: 'gold' },
-    createdAt: '2026-01-01T00:00:00.000Z',
-    updatedAt: '2026-09-01T00:00:00.000Z',
-  };
 }
 
 function readBody(request: IncomingMessage): Promise<string> {

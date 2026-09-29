@@ -1,7 +1,7 @@
 # CNCT for the web
 
-The official CNCT SDK for browsers and Node. Live chat, the contact directory, the calendar and
-tickets — against a CNCT workspace, using the credentials CNCT issues you.
+The official CNCT SDK for browsers and Node. Live chat, the calendar and tickets — against a CNCT
+workspace, using the credentials CNCT issues you.
 
 **It is headless, and that is the whole point.** There is no DOM in this package, not one element and
 not one style rule. A business building their own site has a design system already; shipping them a
@@ -97,7 +97,7 @@ file to its own origin. Nothing else differs between them.
 
 ---
 
-## Three credentials, three doors
+## Two credentials, two doors
 
 Which parts of this SDK you can use is decided entirely by what CNCT gave you. They are not
 interchangeable, and the difference is not convenience — it is what happens when one leaks.
@@ -106,17 +106,22 @@ interchangeable, and the difference is not convenience — it is what happens wh
 | ------------------------- | ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `CnctChatPublicKey('…')`  | Live chat, as a visitor | **In your bundle.** It identifies an inbox, not a person, and it is already public — it is in the URL of the hosted chat page.                                            |
 | `CnctApiKey('kaer_sk_…')` | Bookings and tickets    | **On a server you control.** It is account-wide: it can book for, and cancel for, anybody. Never in a page. Mint one in the CNCT console under **Settings → Developers**. |
-| `CnctOperatorToken('…')`  | The contact directory   | A staff app, from a person's own login. Eight hours, carrying that person's role.                                                                                         |
 
 The SDK will tell you what it holds, which is useful for an app that hides the tabs it cannot serve
 rather than discovering the answer with a 401 in front of a customer:
 
 ```js
-Cnct.modulesFor(credentials); // ['chat'] | ['bookings', 'tickets'] | ['contacts']
+Cnct.modulesFor(credentials); // ['chat'] | ['bookings', 'tickets']
 ```
+
+Tickets also need the account to hold ticketing. `agent.catalogue()` lists exactly the tools a
+particular account offers, so read that rather than assuming.
 
 `CnctApiKey` has `assertNotInBrowser()` for the mistake that matters: call it at startup and a key
 that has found its way into a bundle crashes in development rather than leaking in production.
+
+0.1.x had a third, `CnctOperatorToken`, for the contact directory on a staff member's own
+login. It is gone — see [docs/MIGRATING.md](docs/MIGRATING.md).
 
 ---
 
@@ -362,7 +367,34 @@ Every method that is about a particular person takes `customerPhone` in full int
 is not a convenience parameter — it _is_ the authorization boundary. There is no ambient identity out
 here, so the number is what decides whose booking may be read and changed.
 
-Three things worth knowing before you build on it, all covered in
+### Tickets, and following one up
+
+A ticket is work the business could not finish in the moment and hands to a colleague. Raising one,
+and then answering the customer who comes back asking about it:
+
+```js
+// "Any news on my refund?"
+const [open] = (await agent.tickets.forCustomer(phone, { q: 'refund' })).items;
+const ticket = await agent.tickets.get(phone, open.ticketNumber);
+ticket.status; // 'WAITING'
+ticket.waitingOnCustomer; // true — they are waiting on an answer from the customer
+ticket.history; // [{ on: '2026-09-18', what: 'Raised' }, { on: '2026-09-19', what: 'Waiting on the customer' }]
+
+// "The order number is 881"
+const added = await agent.tickets.addTo({
+  customerPhone: phone,
+  ticketNumber: ticket.ticketNumber,
+  note: 'The order number is 881',
+});
+added.resumed; // true — it was waiting on them, and is being worked on again
+```
+
+**`get` is safe to show the customer it belongs to** — it carries no names, no team and none of the
+notes staff write for each other. **`addTo` is what a follow-up is for**: raising a second ticket about
+the same thing splits the story in two. A finished ticket refuses it, and the refusal says to raise a
+new one.
+
+Four things worth knowing before you build on it, all covered in
 [docs/BOOKINGS-AND-TICKETS.md](docs/BOOKINGS-AND-TICKETS.md):
 
 - **Pass `startsAt` back exactly as the slot gave it.** Rebuilding it from a parsed `Date` is how a
@@ -371,28 +403,15 @@ Three things worth knowing before you build on it, all covered in
   assigns whoever is free — do not offer a choice". The `note` says which case you are in.
 - **`agent.call(tool, args)` reaches any tool the platform adds later**, on the day it ships, without
   waiting for a release here.
+- **It talks to `/api/tools`.** CNCT serves that since 2026-09-29, and still answers the old
+  `/api/booking-tools` that 0.1.x used.
 
-## Contacts
+### The same tools, for an AI agent
 
-The account's contact directory, on an operator's console session. There is no contacts surface on the
-API-key credential today — that is the platform's boundary rather than this SDK's, and it is worth
-knowing before you design around it.
-
-```js
-const { session, challenge } = await cnct.auth.login({ email, password });
-if (challenge) {
-  // MFA is the ordinary path, not an error: show a code field and call verifyMfa.
-}
-const contacts = cnct.contacts(session.credentials);
-
-for await (const contact of contacts.listAll({ query: 'layla' })) {
-  console.log(displayNameOf(contact), contact.phoneNumber);
-}
-```
-
-Paged by cursor rather than by offset, and that is not a style choice: every inbound message touches the
-contact it belongs to, so the order is being rewritten while somebody scrolls it. Under an offset that
-is page two silently re-showing half of page one. See [docs/CONTACTS.md](docs/CONTACTS.md).
+This SDK is the REST side. The same key opens the same tools over MCP, at
+**`https://app.doo.ooo/api/mcp`** with the key as a bearer token — point Claude Desktop, an Agent SDK
+tool runner or any other MCP client there and it discovers them on its own. MCP also carries one tool
+REST does not: `request_operator`, for handing a live phone call to a person.
 
 ---
 
@@ -416,7 +435,7 @@ try {
 `unauthenticated`, `conflict` and `server_error` come from the platform. `offline`, `timeout`,
 `no_session`, `empty`, `not_found`, `bad_response`, `missing_credential`, `request_failed` and
 `tool_refused` are this client's. A refusal keeps the server's whole body on `error.details` — a
-rejected contact carries the record it collided with, a validation failure carries the fields.
+refused tool call carries everything the tool answered, a validation failure carries the fields.
 
 ---
 

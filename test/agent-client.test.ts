@@ -182,9 +182,76 @@ describe('tickets', () => {
   });
 });
 
+describe('following up on a ticket', () => {
+  it('reads one ticket as the customer may see it', async () => {
+    const ticket = await agentFor(cnct).tickets.get('+97312345678', 1042);
+    expect(ticket).toMatchObject({
+      ticketNumber: 1042,
+      kind: 'Refund',
+      status: 'WAITING',
+      waitingOnCustomer: true,
+      details: [{ name: 'Order number', value: '881' }],
+      history: [
+        { on: '2026-09-18', what: 'Raised' },
+        { on: '2026-09-19', what: 'Waiting on the customer' },
+      ],
+    });
+    expect(cnct.requests.at(-1)?.body).toEqual({
+      customerPhone: '+97312345678',
+      ticketNumber: 1042,
+    });
+  });
+
+  it('throws on a ticket that is not theirs, rather than handing back an empty one', async () => {
+    await expect(agentFor(cnct).tickets.get('+97312345678', 9)).rejects.toMatchObject({
+      code: 'tool_refused',
+    });
+  });
+
+  it('passes a follow-up on, and says when it started the ticket moving again', async () => {
+    const added = await agentFor(cnct).tickets.addTo({
+      customerPhone: '+97312345678',
+      ticketNumber: 1042,
+      note: 'The order number is 881',
+    });
+    expect(added).toEqual({ ticketNumber: 1042, resumed: true, note: 'Added.' });
+    expect(cnct.requests.at(-1)?.path).toBe('/api/tools/add_to_ticket');
+  });
+
+  it('refuses a finished ticket in the platform’s own words', async () => {
+    await expect(
+      agentFor(cnct).tickets.addTo({ customerPhone: '+97312345678', ticketNumber: 7, note: 'x' }),
+    ).rejects.toThrow(/^Not added\. #7 is resolved/);
+  });
+
+  it('narrows a customer’s tickets, and sends nothing it was not given', async () => {
+    const agent = agentFor(cnct);
+    await agent.tickets.forCustomer('+97312345678', { q: 'refund', includeResolved: true });
+    expect(cnct.requests.at(-1)?.body).toEqual({
+      customerPhone: '+97312345678',
+      q: 'refund',
+      includeResolved: true,
+    });
+    await agent.tickets.forCustomer('+97312345678');
+    expect(cnct.requests.at(-1)?.body).toEqual({ customerPhone: '+97312345678' });
+  });
+});
+
+describe('the address', () => {
+  it('is /api/tools, not the old /api/booking-tools', async () => {
+    const agent = agentFor(cnct);
+    await agent.catalogue();
+    await agent.bookings.services();
+    expect(cnct.requests.map((request) => request.path)).toEqual([
+      '/api/tools',
+      '/api/tools/list_services',
+    ]);
+  });
+});
+
 describe('the escape hatch', () => {
   it('reaches a tool this SDK has never heard of', async () => {
-    cnct.stub('POST /api/booking-tools/some_future_tool', { status: 200, body: { ok: true } });
+    cnct.stub('POST /api/tools/some_future_tool', { status: 200, body: { ok: true } });
     await expect(agentFor(cnct).call('some_future_tool', { a: 1 })).resolves.toEqual({ ok: true });
   });
 

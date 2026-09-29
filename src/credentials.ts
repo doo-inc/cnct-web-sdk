@@ -3,12 +3,12 @@ import { CnctError, CnctErrorCode } from './errors.js';
 /**
  * A credential CNCT issued you, and the only thing that decides which parts of this SDK you can use.
  *
- * There are three, they are not interchangeable, and the difference between them is not convenience
- * — it is what happens when one leaks. Each class says what it opens and where it is safe to keep it.
+ * There are two, they are not interchangeable, and the difference between them is not convenience —
+ * it is what happens when one leaks. Each class says what it opens and where it is safe to keep it.
  */
 export abstract class CnctCredentials {
-  /** Tells the three apart without `instanceof`, which does not survive a bundler boundary. */
-  abstract readonly kind: 'chatPublicKey' | 'apiKey' | 'operatorToken';
+  /** Tells the two apart without `instanceof`, which does not survive a bundler boundary. */
+  abstract readonly kind: 'chatPublicKey' | 'apiKey';
 
   /**
    * The headers this credential travels on. Different for each, deliberately: see
@@ -136,51 +136,6 @@ export class CnctApiKey extends CnctCredentials {
         CnctErrorCode.invalid,
       );
     }
-  }
-}
-
-/**
- * An operator's console session — the credential behind contacts and the rest of the account surface.
- *
- * It is a person's login, eight hours long, and it carries whatever that person's role allows. Use it
- * for back-office tools, internal apps and integrations run by staff. It is the wrong credential for
- * anything a customer holds.
- *
- * Obtain one with `CnctOperatorAuth.login(...)`, or pass a token you already have.
- */
-export class CnctOperatorToken extends CnctCredentials {
-  override readonly kind = 'operatorToken' as const;
-  readonly token: string;
-
-  /**
-   * When this stops working, where the caller knows. The server issues eight-hour tokens; this is
-   * filled in by `CnctOperatorAuth.login` and left undefined for a token handed in from elsewhere.
-   */
-  readonly expiresAt?: Date;
-
-  constructor(token: string, options: { expiresAt?: Date } = {}) {
-    super();
-    if (!token || !token.trim()) {
-      throw new CnctError('An operator token cannot be empty.', CnctErrorCode.invalid);
-    }
-    this.token = token.trim();
-    if (options.expiresAt) this.expiresAt = options.expiresAt;
-  }
-
-  /**
-   * True once {@link expiresAt} has passed. An unknown expiry answers false — an unknown expiry is
-   * not an expired one, and guessing would log people out of a session that still works.
-   */
-  get isExpired(): boolean {
-    return this.expiresAt !== undefined && Date.now() > this.expiresAt.getTime();
-  }
-
-  override get headers(): Record<string, string> {
-    return { authorization: `Bearer ${this.token}` };
-  }
-
-  override get redacted(): string {
-    return `operator:${tail(this.token)}`;
   }
 }
 
