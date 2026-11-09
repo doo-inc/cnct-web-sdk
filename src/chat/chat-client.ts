@@ -304,7 +304,7 @@ export class CnctChatClient {
     if (attachmentIds.length > CnctAttachmentLimits.maxFiles) {
       throw new CnctError(
         `Up to ${CnctAttachmentLimits.maxFiles} files at a time.`,
-        CnctErrorCode.tooManyFiles,
+        CnctErrorCode.tooMany,
       );
     }
     const extras = { attachmentIds, ...(options.replyId ? { replyId: options.replyId } : {}) };
@@ -432,7 +432,7 @@ export class CnctChatClient {
     if (problem) throw problem;
     const prepared = await prepareAttachment(file, { filename, transcoder: this.transcoder });
     if (prepared.blob.size > CnctAttachmentLimits.maxBytes) {
-      throw new CnctError(`${prepared.filename} is over 50 MB.`, CnctErrorCode.fileTooLarge);
+      throw new CnctError(`${prepared.filename} is over 50 MB.`, CnctErrorCode.tooLarge);
     }
 
     const uploader = this.config.uploader ?? defaultUploader(this.config.fetch);
@@ -449,13 +449,15 @@ export class CnctChatClient {
       return data.attachment as unknown as CnctChatAttachment;
     }
     throw chatFailure(status, data, {
-      // The inbox takes no files: a refusal the visitor cannot fix by trying again.
-      403: CnctErrorCode.invalid,
+      // The inbox takes no files. Not `unauthenticated`, which is what a bare 403 would read as:
+      // the session is fine, and clearing it would throw the conversation away.
+      403: CnctErrorCode.attachmentsDisabled,
       409: CnctErrorCode.conversationClosed,
       413: CnctErrorCode.tooLarge,
-      422: CnctErrorCode.invalid,
+      415: CnctErrorCode.unsupportedType,
+      422: CnctErrorCode.unsupportedType,
       // The deployment keeps no files at all.
-      503: CnctErrorCode.serverError,
+      503: CnctErrorCode.attachmentsDisabled,
     });
   }
 

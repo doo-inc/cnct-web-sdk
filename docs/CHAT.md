@@ -126,8 +126,10 @@ Two steps, each file on its own: upload it to `/api/chat/public/attachments` (mu
 the types listed in `CnctAttachmentLimits.types`. **HEIC is not among them**: `upload()` converts it to
 JPEG first where the runtime can decode it, and downscales a JPEG photo over 2560 px on its long side.
 
-Refusals: `403` the inbox takes no files, `409` the conversation has ended, `413`/`422` too big or the
-wrong type, `503` the deployment keeps no files. The body's `error` is a sentence for a person.
+Refusals: `403` the inbox takes no files (`attachments_disabled`), `409` the conversation has ended
+(`conversation_closed`), `413` too big (`too_large`), `415`/`422` the wrong type (`unsupported_type`),
+`503` the deployment keeps no files (`attachments_disabled`). A `code` in the body wins over all of
+these, and the body's `error` is a sentence for a person.
 
 ### Signed-in users
 
@@ -163,5 +165,5 @@ a loop rather than a recovery.
 
 Error codes are stable and worth branching on: `invalid`, `rate_limited`, `too_large`,
 `conversation_closed`, `conversation_changed`, `conflict`, `unauthenticated`, `server_error` from the
-server; and from this client before anything is sent, `too_many_files`, `file_too_large` and
-`unsupported_file_type`.
+server; and about files — before anything is uploaded, or from the attachments endpoint —
+`too_many`, `too_large`, `unsupported_type` and `attachments_disabled`, the same on every CNCT SDK.
