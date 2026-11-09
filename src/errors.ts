@@ -122,15 +122,24 @@ export const CnctErrorCode = {
    * not on file, no ticket types are configured — and this is that, raised.
    */
   toolRefused: 'tool_refused',
-  /** More files than one message may carry — ten. Said before anything is uploaded. */
-  tooManyFiles: 'too_many_files',
-  /** A file over the 50 MB a message may carry. Said before anything is uploaded. */
-  fileTooLarge: 'file_too_large',
   /**
-   * A kind of file the chat does not take, or a HEIC photo this runtime cannot turn into a JPEG.
-   * Said before anything is uploaded.
+   * More files than one message may carry — ten. Said before anything is uploaded. (A file over the
+   * 50 MB limit is `too_large`, before upload as after.)
+   *
+   * The attachment codes are the same on the iOS and Android SDKs, so a support answer about a file
+   * is the same answer on every platform.
    */
-  unsupportedFileType: 'unsupported_file_type',
+  tooMany: 'too_many',
+  /**
+   * A kind of file the chat does not take — said before upload, or answered `415`/`422` — or a HEIC
+   * photo this runtime cannot turn into a JPEG.
+   */
+  unsupportedType: 'unsupported_type',
+  /**
+   * The inbox takes no files (`403`), or the deployment keeps none (`503`). Not a session problem:
+   * the conversation goes on, without files.
+   */
+  attachmentsDisabled: 'attachments_disabled',
   /** An upload the caller cancelled with its `signal`. Not a failure, and not worth reporting. */
   cancelled: 'cancelled',
 } as const;

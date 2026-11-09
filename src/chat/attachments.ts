@@ -117,8 +117,8 @@ export function isHeic(file: CnctFileLike): boolean {
  * eleventh is refused rather than the whole set. HEIC counts as acceptable here when
  * `canConvertHeic` says this runtime can turn it into a JPEG; {@link prepareAttachment} does that.
  *
- * The codes are this client's own and stable: `too_many_files`, `file_too_large` and
- * `unsupported_file_type`.
+ * The codes are stable and the same on every CNCT SDK: `too_many`, `too_large` and
+ * `unsupported_type`.
  */
 export function attachmentProblem(
   file: CnctFileLike,
@@ -128,18 +128,18 @@ export function attachmentProblem(
   if ((options.alreadyPicked ?? 0) >= CnctAttachmentLimits.maxFiles) {
     return new CnctError(
       `Up to ${CnctAttachmentLimits.maxFiles} files at a time.`,
-      CnctErrorCode.tooManyFiles,
+      CnctErrorCode.tooMany,
     );
   }
   if (file.size > CnctAttachmentLimits.maxBytes) {
-    return new CnctError(`${name} is over 50 MB.`, CnctErrorCode.fileTooLarge);
+    return new CnctError(`${name} is over 50 MB.`, CnctErrorCode.tooLarge);
   }
   const type = attachmentMimeType(file);
   if (isAccepted(type)) return null;
   if (HEIC.has(type) && (options.canConvertHeic ?? defaultImageTranscoder() !== null)) return null;
   return new CnctError(
     `${name} is a kind of file this chat does not take.`,
-    CnctErrorCode.unsupportedFileType,
+    CnctErrorCode.unsupportedType,
   );
 }
 
@@ -237,7 +237,7 @@ export async function prepareAttachment(
   if (HEIC.has(mimeType)) {
     const refused = new CnctError(
       `${filename} is a HEIC photo, and this browser cannot turn it into a JPEG to send.`,
-      CnctErrorCode.unsupportedFileType,
+      CnctErrorCode.unsupportedType,
     );
     if (!transcoder) throw refused;
     let jpeg: Blob | null;

@@ -250,13 +250,13 @@ export class CnctChatView {
     for (const file of list) {
       const name = file.name || this.t('attachment');
       const problem = this.client.checkAttachment(file, this.picked.length);
-      if (problem?.code === CnctErrorCode.tooManyFiles) {
+      if (problem?.code === CnctErrorCode.tooMany) {
         this.notice = this.t('tooMany');
         break;
       }
       if (problem) {
         this.notice =
-          problem.code === CnctErrorCode.fileTooLarge
+          problem.code === CnctErrorCode.tooLarge
             ? this.t('tooBig', { name })
             : this.t('uploadFailed', { name });
         continue;
@@ -552,7 +552,7 @@ export class CnctChatView {
       if (code === CnctErrorCode.conversationClosed) void this.client.resume().catch(() => {});
       this.failUpload(
         one,
-        code === CnctErrorCode.fileTooLarge || code === CnctErrorCode.tooLarge
+        code === CnctErrorCode.tooLarge
           ? this.t('tooBig', { name: one.name })
           : this.t('uploadFailed', { name: one.name }),
       );
