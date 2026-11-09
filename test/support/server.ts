@@ -46,11 +46,13 @@ export async function startMockCnct(options: { prefix?: string } = {}): Promise<
   const uploads: MockCnct['uploads'] = [];
   const tokens = new Set([TOKEN]);
   let conversationNumber = 1;
+  const closed = { value: false };
   const conversation = () => ({
     id: `conv_${conversationNumber}`,
-    status: 'OPEN',
+    status: closed.value ? 'CLOSED' : 'OPEN',
     startedAt: '2026-09-19T08:00:00.000Z',
     withPerson: false,
+    ...(closed.value ? { closedAt: '2026-09-19T09:00:00.000Z', ratable: true, rating: null } : {}),
   });
   const inbox: { value: Record<string, unknown> } = {
     value: {
@@ -92,7 +94,6 @@ export async function startMockCnct(options: { prefix?: string } = {}): Promise<
     accepts: ['ping', 'typing', 'send'] as string[],
     acceptToken: true,
   };
-  const closed = { value: false };
 
   const server: Server = createServer((request, response) => {
     void handle(request, response);

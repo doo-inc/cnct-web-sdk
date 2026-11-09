@@ -703,6 +703,30 @@ describe('read', () => {
   });
 });
 
+describe('a conversation that ends', () => {
+  it('is marked closed at once, then learns from the server whether it can be rated', async () => {
+    const chat = clientFor(cnct, { socket: false });
+    await chat.start({ displayName: 'Layla' });
+    await chat.end();
+    expect(chat.state.conversation).toMatchObject({ id: 'conv_1', status: 'CLOSED' });
+    expect(chat.state.conversation?.closedAt).toEqual(expect.any(String));
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(chat.state.conversation?.ratable).toBe(true);
+    chat.disconnect();
+  });
+
+  it('does the same when the business closes it', async () => {
+    const chat = await connectedClient(cnct);
+    const closed = new Promise<void>((resolve) => chat.on('closed', () => resolve()));
+    cnct.push({ type: 'chat.closed' });
+    await closed;
+    expect(chat.state.status).toBe('ended');
+    expect(chat.state.conversation?.status).toBe('CLOSED');
+    expect(chat.canSend).toBe(false);
+    chat.disconnect();
+  });
+});
+
 describe('rating and the profile', () => {
   it('rates the conversation and takes the server’s answer into the state', async () => {
     const chat = clientFor(cnct, { socket: false });

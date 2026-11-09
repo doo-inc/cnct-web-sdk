@@ -472,8 +472,37 @@ export class CnctChatClient {
     if (!this.token) return;
     await this.request('/api/chat/public/close', { method: 'POST' });
     this.closedByUs = true;
-    this.patch({ status: 'ended' });
+    this.markClosed();
     this.disconnect();
+  }
+
+  /**
+   * The conversation is over, by either side. Marked closed at once, so a UI swaps the composer for
+   * "start a new one" without waiting; then read back, because only the server knows whether it can
+   * still be rated — which is what decides whether to ask how it went.
+   */
+  private markClosed(): void {
+    const conversation = this.state.conversation;
+    this.patch({
+      status: 'ended',
+      theyAreTyping: false,
+      conversation: {
+        ...(conversation ?? ({} as CnctChatConversation)),
+        status: 'CLOSED',
+        closedAt: conversation?.closedAt ?? new Date().toISOString(),
+      },
+    });
+    const id = conversation?.id;
+    if (!id || !this.token) return;
+    void this.getConversation(id)
+      .then(({ conversation: fresh }) => {
+        // Closed stays closed: a read that races the close must not reopen it on screen.
+        if (fresh && this.state.conversation?.id === id) {
+          this.patch({ conversation: { ...this.state.conversation, ...fresh, status: 'CLOSED' } });
+        }
+      })
+      // The thread is already right; whether to ask for a rating waits for the next load.
+      .catch(() => {});
   }
 
   // ── Who the visitor is ─────────────────────────────────────────────────────────────────────────
@@ -905,13 +934,7 @@ export class CnctChatClient {
       }
       case 'chat.closed':
         this.closedByUs = true;
-        this.patch({
-          status: 'ended',
-          conversation: {
-            ...(this.state.conversation ?? ({} as CnctChatConversation)),
-            status: 'CLOSED',
-          },
-        });
+        this.markClosed();
         this.emit('closed', undefined);
         return;
       default:
