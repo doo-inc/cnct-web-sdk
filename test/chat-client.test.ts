@@ -110,7 +110,7 @@ describe('a conversation', () => {
     await chat.start({ displayName: 'Layla' });
     await connected;
     await new Promise((resolve) => setTimeout(resolve, 20));
-    expect(cnct.requests.some((r) => r.path === '/api/chat/public/session')).toBe(true);
+    expect(cnct.requests.some((r) => r.path.startsWith('/api/chat/public/session?'))).toBe(true);
     chat.disconnect();
   });
 

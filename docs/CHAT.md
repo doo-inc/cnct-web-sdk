@@ -80,29 +80,90 @@ leak of who works for you.
 The SDK is a convenience over a contract you can hold directly.
 
 ```
-GET  /api/chat/public/:publicKey            → the inbox. No credential.
-POST /api/chat/public/:publicKey/session    → { displayName, phone? } → { token, messages, … }
-GET  /api/chat/public/session               → resume
-POST /api/chat/public/messages              → { body, clientKey? }
+GET  /api/chat/public/:publicKey               → the inbox, with widget, team, availability. No credential.
+POST /api/chat/public/:publicKey/session       → { displayName?, phone?, timezone? } → { token, messages, … }
+GET  /api/chat/public/session?timezone=…       → resume
+POST /api/chat/public/:publicKey/identify      → { userId, userHash, name?, email?, phone? } → { token, visitor }
+POST /api/chat/public/messages                 → { body, clientKey?, attachmentIds?, replyId? }
+POST /api/chat/public/attachments              → multipart, one part named `file` → 201 { attachment }
+GET  /api/chat/public/attachments/:id          → the bytes of a file, either way
+GET  /api/chat/public/conversations            → { visitor, conversations } — up to 50, newest first
+GET  /api/chat/public/conversations/:id        → { visitor, conversation, messages }
+POST /api/chat/public/conversations/:id/read   → 204
+POST /api/chat/public/conversations/:id/rating → { score, comment? } → { conversation }
+POST /api/chat/public/profile                  → { displayName, phone? } → { visitor }
 POST /api/chat/public/close
-GET  /api/chat/public/attachments/:id       → the bytes of a file an operator sent
 ```
 
 The credential is the `token` from session start, sent as `x-chat-token`. **Never as `Authorization`:**
 the rate limiter keys on `ip + authorization`, so a visitor who never sends that header falls through to
-their IP and cannot mint themselves a fresh budget by inventing one.
+their IP and cannot mint themselves a fresh budget by inventing one. Never in a URL either: a query
+string ends up in referrers, logs and the address bar.
+
+A POST with no body sends no `content-type`. The server refuses a request that says JSON and sends
+nothing, which is what `close` and `read` are.
+
+### Messages
+
+A message as the visitor sees it carries, beside `id`, `speaker`, `body`, `createdAt` and `clientKey`:
+
+|               |                                                                                                                                        |
+| ------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `sender`      | `{ kind: 'person', name, avatar }` for an operator, `{ kind: 'ai', name, … }` for the assistant; null for the visitor and system lines |
+| `type`/`data` | `TEXT`, or a card and its allowlisted fields — see above. An unknown `type` renders as its `body`                                      |
+| `flow`        | An assistant's question: `{ text, layout, choices: [{ id, title, description? }], footer?, listButton?, media?, expects? }`            |
+| `suggestions` | Up to three short replies the assistant offers                                                                                         |
+| `replyTo`     | `{ messageId, mine, excerpt, attachmentKind? }` — the message this one quotes                                                          |
+| `attachments` | `[{ id, kind, mimeType, filename, bytes }]` — only files that are stored                                                               |
+
+`body` is words, files, or both — never neither. A flow choice the visitor taps is sent as its `title`,
+with its `id` as `replyId`, so the flow follows the button rather than reading the title as typing.
+
+### Files
+
+Two steps, each file on its own: upload it to `/api/chat/public/attachments` (multipart, one part named
+`file`), then send the message with the ids in `attachmentIds`. Up to ten files a message, 50 MB each, of
+the types listed in `CnctAttachmentLimits.types`. **HEIC is not among them**: `upload()` converts it to
+JPEG first where the runtime can decode it, and downscales a JPEG photo over 2560 px on its long side.
+
+Refusals: `403` the inbox takes no files (`attachments_disabled`), `409` the conversation has ended
+(`conversation_closed`), `413` too big (`too_large`), `415`/`422` the wrong type (`unsupported_type`),
+`503` the deployment keeps no files (`attachments_disabled`). A `code` in the body wins over all of
+these, and the body's `error` is a sentence for a person.
+
+### Signed-in users
+
+`userHash` is `HMAC-SHA256(userId, the inbox's identity secret)` in lowercase hex, **computed on your
+server**. Send the current `x-chat-token` with the call, so a conversation started before sign-in moves
+across, and keep the token it answers with instead. `409` means identity is not set up for the inbox;
+`401` means the hash did not verify — in which case the anonymous session is still good.
+
+### The socket
 
 The socket is `wss://app.doo.ooo/ws/chat`. Send `{"type":"auth","token":"…"}` within five seconds or
 it closes. It answers `{"type":"authenticated","accepts":["ping","typing","send"]}` — read `accepts`
 rather than assuming.
 
-Inbound frames: `ping`, `typing`, and `send` as `{ type, id, body, clientKey }`. Outbound: `pong`,
-`ack` / `error` (both echoing your `id`), and the events `chat.message`, `chat.typing`,
-`chat.conversation.updated`, `chat.closed`.
+Inbound frames: `ping`, `typing`, and `send` as `{ type, id, body, clientKey, attachmentIds?, replyId? }`
+— the same body the POST takes. Outbound: `pong`, `ack` / `error` (both echoing your `id`), and the
+events:
+
+|                             |                                                                                        |
+| --------------------------- | -------------------------------------------------------------------------------------- |
+| `chat.message`              | `{ message }` — a new one                                                              |
+| `chat.message.updated`      | `{ message }` — edited, deleted, or a file finished storing. Replace it by `id`        |
+| `chat.typing`               | The other side is typing. A start, never a stop: clear it yourself after a few seconds |
+| `chat.read`                 | `{ at }` — the team has read the visitor's messages up to then: a "Seen"               |
+| `chat.conversation.updated` | What changed — `status`, `withPerson`, `assignee` — merged over what you had           |
+| `chat.closed`               | The conversation ended                                                                 |
+
+Anything else is a newer server talking. Ignore it.
 
 A close code of `1008` means the token did not resolve. Do not reconnect on it — the SDK clears the
 stored token and emits `unauthenticated` instead, because retrying a credential that will never work is
 a loop rather than a recovery.
 
 Error codes are stable and worth branching on: `invalid`, `rate_limited`, `too_large`,
-`conversation_closed`, `conversation_changed`, `unauthenticated`, `server_error`.
+`conversation_closed`, `conversation_changed`, `conflict`, `unauthenticated`, `server_error` from the
+server; and about files — before anything is uploaded, or from the attachments endpoint —
+`too_many`, `too_large`, `unsupported_type` and `attachments_disabled`, the same on every CNCT SDK.

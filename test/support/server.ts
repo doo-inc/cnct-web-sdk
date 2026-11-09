@@ -1,3 +1,4 @@
+import { createHmac } from 'node:crypto';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { WebSocketServer, type WebSocket as NodeWebSocket } from 'ws';
 
@@ -21,10 +22,20 @@ export interface MockCnct {
   /** Set false to make the socket refuse the token with 1008. */
   acceptToken: boolean;
   sockets: NodeWebSocket[];
+  /** Every file uploaded, as the server parsed it out of the multipart body. */
+  uploads: { id: string; field: string; filename: string; type: string; bytes: Uint8Array }[];
+  /** What `boot()` answers with, beyond the basics. Replace to test a different inbox. */
+  inbox: Record<string, unknown>;
   close(): Promise<void>;
 }
 
 const TOKEN = 'visitor-token-abc';
+/** What `identify` hands back: a different token, so a test can see the old one was replaced. */
+export const SIGNED_IN_TOKEN = 'signed-in-token-xyz';
+/** The inbox's identity secret, which in real life lives only on the business's server. */
+export const IDENTITY_SECRET = 'the-inbox-identity-secret';
+export const signUser = (userId: string) =>
+  createHmac('sha256', IDENTITY_SECRET).update(userId).digest('hex');
 
 export async function startMockCnct(options: { prefix?: string } = {}): Promise<MockCnct> {
   const prefix = options.prefix ?? '';
@@ -32,6 +43,52 @@ export async function startMockCnct(options: { prefix?: string } = {}): Promise<
   const stubs = new Map<string, { status: number; body: unknown }>();
   const sockets: NodeWebSocket[] = [];
   const messages: Record<string, unknown>[] = [];
+  const uploads: MockCnct['uploads'] = [];
+  const tokens = new Set([TOKEN]);
+  let conversationNumber = 1;
+  const closed = { value: false };
+  const conversation = () => ({
+    id: `conv_${conversationNumber}`,
+    status: closed.value ? 'CLOSED' : 'OPEN',
+    startedAt: '2026-09-19T08:00:00.000Z',
+    withPerson: false,
+    ...(closed.value ? { closedAt: '2026-09-19T09:00:00.000Z', ratable: true, rating: null } : {}),
+  });
+  const inbox: { value: Record<string, unknown> } = {
+    value: {
+      widget: { brand: { color: '#123456', language: 'ar' }, chat: { start: 'message' } },
+      team: [{ kind: 'person', name: 'Sara', avatar: 'fox-clay', secret: 'never published' }],
+      availability: {
+        open: false,
+        opensAt: '2026-09-20T05:00:00.000Z',
+        assistant: true,
+        replyMinutes: null,
+      },
+    },
+  };
+  const store = (input: { body: string; clientKey?: string; attachmentIds?: string[] }) => {
+    const stored = {
+      id: `msg_${messages.length + 1}`,
+      speaker: 'CALLER',
+      sender: null,
+      type: 'TEXT',
+      body: input.body,
+      createdAt: new Date(Date.now() + messages.length).toISOString(),
+      clientKey: input.clientKey ?? null,
+      attachments: (input.attachmentIds ?? [])
+        .map((id) => uploads.find((upload) => upload.id === id))
+        .filter(Boolean)
+        .map((upload) => ({
+          id: upload!.id,
+          kind: upload!.type.startsWith('image/') ? 'IMAGE' : 'FILE',
+          mimeType: upload!.type,
+          filename: upload!.filename,
+          bytes: upload!.bytes.length,
+        })),
+    };
+    messages.push(stored);
+    return stored;
+  };
 
   const state = {
     accepts: ['ping', 'typing', 'send'] as string[],
@@ -51,8 +108,10 @@ export async function startMockCnct(options: { prefix?: string } = {}): Promise<
   async function handle(request: IncomingMessage, response: ServerResponse) {
     const url = new URL(request.url ?? '/', 'http://localhost');
     const path = url.pathname.startsWith(prefix) ? url.pathname.slice(prefix.length) : url.pathname;
-    const raw = await readBody(request);
-    const body = raw ? safeParse(raw) : undefined;
+    const bytes = await readBody(request);
+    const raw = bytes.toString('utf8');
+    const multipart = String(request.headers['content-type'] ?? '').startsWith('multipart/');
+    const body = raw && !multipart ? safeParse(raw) : undefined;
     requests.push({
       method: request.method ?? 'GET',
       path: url.pathname + (url.search || ''),
@@ -67,15 +126,105 @@ export async function startMockCnct(options: { prefix?: string } = {}): Promise<
     }
 
     const token = request.headers['x-chat-token'];
-    const authorized = token === TOKEN;
+    const authorized = typeof token === 'string' && tokens.has(token);
 
     // ── Chat ───────────────────────────────────────────────────────────────────────────────────
     if (request.method === 'GET' && path === '/api/chat/public/session') {
       if (!authorized) return json(response, 401, { error: 'Unauthenticated' });
       return json(response, 200, {
         visitor: { displayName: 'Layla' },
-        conversation: { status: 'OPEN', startedAt: '2026-09-19T08:00:00.000Z', withPerson: false },
+        conversation: conversation(),
         messages: messages.slice(),
+      });
+    }
+    if (request.method === 'GET' && path === '/api/chat/public/conversations') {
+      if (!authorized) return json(response, 401, { error: 'Unauthenticated' });
+      return json(response, 200, {
+        visitor: { displayName: 'Layla', anonymous: false },
+        conversations: [{ ...conversation(), preview: messages.at(-1) ?? null }],
+      });
+    }
+    {
+      const match = /^\/api\/chat\/public\/conversations\/([^/]+)(\/read|\/rating)?$/.exec(path);
+      if (match) {
+        if (!authorized) return json(response, 401, { error: 'Unauthenticated' });
+        const id = decodeURIComponent(match[1]);
+        if (request.method === 'GET' && !match[2]) {
+          return json(response, 200, {
+            visitor: { displayName: 'Layla' },
+            conversation: { ...conversation(), id },
+            messages: messages.slice(),
+          });
+        }
+        if (request.method === 'POST' && match[2] === '/read') {
+          response.writeHead(204);
+          return response.end();
+        }
+        if (request.method === 'POST' && match[2] === '/rating') {
+          const input = body as { score: number; comment?: string };
+          return json(response, 200, {
+            conversation: {
+              ...conversation(),
+              id,
+              status: 'CLOSED',
+              ratable: true,
+              rating: {
+                score: input.score,
+                comment: input.comment ?? null,
+                ratedAt: new Date().toISOString(),
+              },
+            },
+          });
+        }
+      }
+    }
+    if (request.method === 'POST' && path === '/api/chat/public/profile') {
+      if (!authorized) return json(response, 401, { error: 'Unauthenticated' });
+      const input = body as { displayName: string };
+      return json(response, 200, { visitor: { displayName: input.displayName, anonymous: false } });
+    }
+    if (request.method === 'POST' && path === '/api/chat/public/attachments') {
+      if (!authorized) return json(response, 401, { error: 'Unauthenticated' });
+      // Parsed by the platform's own rules for multipart rather than by string matching, so a
+      // malformed body is refused here exactly as it would be there.
+      const form = await new Response(new Uint8Array(bytes), {
+        headers: { 'content-type': String(request.headers['content-type']) },
+      })
+        .formData()
+        .catch(() => null);
+      const file = form?.get('file');
+      if (!form || !file || typeof file === 'string') {
+        return json(response, 400, { error: 'Send one file, in a part named file.' });
+      }
+      const fields: string[] = [];
+      form.forEach((_value, key) => fields.push(key));
+      const upload = {
+        id: `att_${uploads.length + 1}`,
+        field: fields.join(','),
+        filename: file.name,
+        type: file.type,
+        bytes: new Uint8Array(await file.arrayBuffer()),
+      };
+      uploads.push(upload);
+      return json(response, 201, {
+        attachment: {
+          id: upload.id,
+          kind: upload.type.startsWith('image/') ? 'IMAGE' : 'FILE',
+          mimeType: upload.type,
+          filename: upload.filename,
+          bytes: upload.bytes.length,
+        },
+      });
+    }
+    if (request.method === 'POST' && /^\/api\/chat\/public\/[^/]+\/identify$/.test(path)) {
+      const input = body as { userId?: string; userHash?: string };
+      if (!input?.userId || input.userHash !== signUser(input.userId)) {
+        return json(response, 401, { error: 'That signature did not verify.' });
+      }
+      tokens.add(SIGNED_IN_TOKEN);
+      return json(response, 200, {
+        token: SIGNED_IN_TOKEN,
+        visitor: { displayName: 'Layla Signed', anonymous: false, identified: true },
       });
     }
     if (request.method === 'GET' && /^\/api\/chat\/public\/[^/]+$/.test(path)) {
@@ -85,35 +234,37 @@ export async function startMockCnct(options: { prefix?: string } = {}): Promise<
         isActive: true,
         greeting: 'How can we help?',
         requirePhone: false,
+        ...inbox.value,
       });
     }
     if (request.method === 'POST' && /^\/api\/chat\/public\/[^/]+\/session$/.test(path)) {
+      // A token for a conversation that is already closed starts a new one for the same visitor.
+      if (authorized && closed.value) {
+        conversationNumber += 1;
+        closed.value = false;
+        messages.length = 0;
+      }
       return json(response, 200, {
         token: TOKEN,
         visitor: { displayName: (body as { displayName?: string })?.displayName ?? 'Visitor' },
-        conversation: { status: 'OPEN', startedAt: '2026-09-19T08:00:00.000Z', withPerson: false },
+        conversation: conversation(),
         messages: messages.slice(),
       });
     }
     if (request.method === 'POST' && path === '/api/chat/public/messages') {
       if (!authorized) return json(response, 401, { error: 'Unauthenticated' });
-      const input = body as { body: string; clientKey?: string };
+      const input = body as { body: string; clientKey?: string; attachmentIds?: string[] };
+      if (!input.body && !input.attachmentIds?.length) {
+        return json(response, 400, { error: 'Say something, or send a file.', code: 'invalid' });
+      }
       // Idempotent, exactly as the platform is: the same clientKey returns the row it already wrote.
       const existing = messages.find((m) => m.clientKey && m.clientKey === input.clientKey);
       if (existing) return json(response, 200, existing);
-      const stored = {
-        id: `msg_${messages.length + 1}`,
-        speaker: 'CALLER',
-        type: 'TEXT',
-        body: input.body,
-        createdAt: new Date(Date.now() + messages.length).toISOString(),
-        clientKey: input.clientKey ?? null,
-      };
-      messages.push(stored);
-      return json(response, 200, stored);
+      return json(response, 200, store(input));
     }
     if (request.method === 'POST' && path === '/api/chat/public/close') {
       if (!authorized) return json(response, 401, { error: 'Unauthenticated' });
+      closed.value = true;
       return json(response, 200, { ok: true });
     }
     if (request.method === 'GET' && path.startsWith('/api/chat/public/attachments/')) {
@@ -164,20 +315,16 @@ export async function startMockCnct(options: { prefix?: string } = {}): Promise<
         const frame = safeParse(String(data)) as Record<string, unknown> | undefined;
         if (!frame) return;
         if (frame.type === 'auth') {
-          if (!state.acceptToken || frame.token !== TOKEN) return ws.close(1008, 'Unauthenticated');
+          if (!state.acceptToken || !tokens.has(String(frame.token))) {
+            return ws.close(1008, 'Unauthenticated');
+          }
           return ws.send(JSON.stringify({ type: 'authenticated', accepts: state.accepts }));
         }
         if (frame.type === 'ping') return ws.send(JSON.stringify({ type: 'pong' }));
         if (frame.type === 'send') {
-          const stored = {
-            id: `msg_${messages.length + 1}`,
-            speaker: 'CALLER',
-            type: 'TEXT',
-            body: frame.body,
-            createdAt: new Date(Date.now() + messages.length).toISOString(),
-            clientKey: frame.clientKey ?? null,
-          };
-          messages.push(stored);
+          const stored = store(
+            frame as { body: string; clientKey?: string; attachmentIds?: string[] },
+          );
           return ws.send(JSON.stringify({ type: 'ack', id: frame.id, message: stored }));
         }
       });
@@ -195,7 +342,14 @@ export async function startMockCnct(options: { prefix?: string } = {}): Promise<
   return {
     baseUrl: `http://127.0.0.1:${port}${prefix}`,
     requests,
-    push: (frame) => sockets.forEach((ws) => ws.send(JSON.stringify(frame))),
+    push: (frame) => {
+      // A reply pushed is a reply stored, as on the platform — so a transcript refetched after it
+      // still has it, and a test does not race the refetch the socket's handshake starts.
+      const message = (frame as { type?: string; payload?: { message?: Record<string, unknown> } })
+        .payload?.message;
+      if ((frame as { type?: string }).type === 'chat.message' && message) messages.push(message);
+      sockets.forEach((ws) => ws.send(JSON.stringify(frame)));
+    },
     stub: (key, value) => void stubs.set(key, value),
     get accepts() {
       return state.accepts;
@@ -210,6 +364,13 @@ export async function startMockCnct(options: { prefix?: string } = {}): Promise<
       state.acceptToken = value;
     },
     sockets,
+    uploads,
+    get inbox() {
+      return inbox.value;
+    },
+    set inbox(value: Record<string, unknown>) {
+      inbox.value = value;
+    },
     close: async () => {
       sockets.forEach((ws) => ws.terminate());
       wss.close();
@@ -320,11 +481,11 @@ function toolResult(tool: string, args: Record<string, unknown>): Record<string,
   }
 }
 
-function readBody(request: IncomingMessage): Promise<string> {
+function readBody(request: IncomingMessage): Promise<Buffer> {
   return new Promise((resolve) => {
-    let raw = '';
-    request.on('data', (chunk) => (raw += chunk));
-    request.on('end', () => resolve(raw));
+    const chunks: Buffer[] = [];
+    request.on('data', (chunk: Buffer) => chunks.push(chunk));
+    request.on('end', () => resolve(Buffer.concat(chunks)));
   });
 }
 

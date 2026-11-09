@@ -1,2 +1,4 @@
 dist/
 node_modules/
+# Shared word for word with the iOS and Android SDKs, so it is never reformatted here.
+docs/chat-ui/SPEC.md

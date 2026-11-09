@@ -192,39 +192,46 @@ the socket. From there, `chat.state` is everything a UI renders.
 `chat.state` is replaced rather than mutated on every change, so a framework comparing references sees
 it and a framework reading fields sees a consistent snapshot.
 
-| Field           | What it is                                                                                   |
-| --------------- | -------------------------------------------------------------------------------------------- |
-| `status`        | `idle` before a session, then `connecting` / `live` / `offline`, and `ended` once closed     |
-| `inbox`         | What `boot()` returned                                                                       |
-| `conversation`  | `{ status, startedAt, withPerson }` — `withPerson` says somebody is on the thread, never who |
-| `messages`      | Oldest first, with `pending` and `failed` on the visitor's own                               |
-| `theyAreTyping` | True while the other side is typing; clears itself                                           |
-| `error`         | The last failure, or null                                                                    |
+| Field           | What it is                                                                               |
+| --------------- | ---------------------------------------------------------------------------------------- |
+| `status`        | `idle` before a session, then `connecting` / `live` / `offline`, and `ended` once closed |
+| `inbox`         | What `boot()` returned                                                                   |
+| `conversation`  | `{ id, status, startedAt, withPerson, assignee, rating, seenAt, … }`                     |
+| `messages`      | Oldest first, with `pending` and `failed` on the visitor's own                           |
+| `theyAreTyping` | True while the other side is typing; clears itself                                       |
+| `error`         | The last failure, or null                                                                |
 
-`speaker` is `CALLER` (them), `AI`, `OPERATOR` or `SYSTEM`. There is no conversation id and no operator
-name anywhere in it — the public surface is an explicit allowlist, not a stripped copy of the internal
-one, and it stays that way whatever gets added to the database later.
+`speaker` is `CALLER` (them), `AI`, `OPERATOR` or `SYSTEM`; `sender` says which person or assistant,
+by first name and face and nothing more. The public surface is an explicit allowlist, not a stripped
+copy of the internal one, and it stays that way whatever gets added to the database later.
 
 `chat.canSend` is the one derived thing worth having: false before a session and once a conversation is
 closed.
 
 ### The methods
 
-|                                 |                                                                                                        |
-| ------------------------------- | ------------------------------------------------------------------------------------------------------ |
-| `boot()`                        | The inbox's greeting and whether it is open. No session needed.                                        |
-| `start({ displayName, phone })` | Begin, or resume as the same person. Opens the socket.                                                 |
-| `resume()`                      | Pick up after a reload. Resolves to `null` when there is nothing to pick up.                           |
-| `send(body, { clientKey })`     | Say something. Resolves with the stored message.                                                       |
-| `retry(clientKey)`              | Re-send a failed message. Safe — see idempotency below.                                                |
-| `typing()`                      | Tell the other side. Throttled here and again on the server.                                           |
-| `end()`                         | The visitor closes it.                                                                                 |
-| `fetchAttachment(attachment)`   | The bytes of a file an operator sent, as a `Blob`.                                                     |
-| `connect()` / `disconnect()`    | Open or drop the socket by hand. Safe at any moment — mid-handshake, and one straight after the other. |
-| `on(event, handler)`            | Returns the unsubscribe.                                                                               |
+|                                  |                                                                                                        |
+| -------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| `boot()`                         | The inbox's greeting and whether it is open. No session needed.                                        |
+| `start({ displayName, phone })`  | Begin, or resume as the same person. Opens the socket.                                                 |
+| `resume()`                       | Pick up after a reload. Resolves to `null` when there is nothing to pick up.                           |
+| `send(body, { clientKey })`      | Say something. Resolves with the stored message.                                                       |
+| `retry(clientKey)`               | Re-send a failed message. Safe — see idempotency below.                                                |
+| `typing()`                       | Tell the other side. Throttled here and again on the server.                                           |
+| `end()`                          | The visitor closes it.                                                                                 |
+| `fetchAttachment(attachment)`    | The bytes of a file, either way, as a `Blob`. Cached by id.                                            |
+| `upload(file, { onProgress })`   | Upload one file for `send(body, { attachments })` to carry. Checked, and HEIC made JPEG, first.        |
+| `choose(choice)`                 | Send a flow choice the visitor tapped: its title, with its id as `replyId`.                            |
+| `identify(identity)`             | Sign the visitor in as one of your users. The anonymous conversation moves across.                     |
+| `listConversations()`            | Up to fifty of this visitor's conversations. `getConversation(id)` reads one.                          |
+| `read()`                         | Tell the team their reply is on screen. Posts once per reply.                                          |
+| `rate(score, { comment })`       | Rate a closed conversation, 1 to 5.                                                                    |
+| `updateProfile({ displayName })` | Give a name, after starting anonymously.                                                               |
+| `connect()` / `disconnect()`     | Open or drop the socket by hand. Safe at any moment — mid-handshake, and one straight after the other. |
+| `on(event, handler)`             | Returns the unsubscribe.                                                                               |
 
-Events: `change`, `message`, `typing`, `conversation`, `closed`, `connected`, `disconnected`,
-`unauthenticated`, `error`.
+Events: `change`, `message`, `messageUpdated`, `read`, `typing`, `conversation`, `closed`, `connected`,
+`disconnected`, `unauthenticated`, `error`.
 
 ### Cards: rendering more than words
 
@@ -309,11 +316,10 @@ the time the constructor returns, so it is only worth awaiting if yours is not.
 
 ### Identity
 
-**A visitor is anonymous until they volunteer a phone number.** There is no signed identity yet — no
-`setUser` with an HMAC — so a customer already logged in to your own site still arrives as a stranger,
-and only joins their existing contact record if they type a number or give one in the pre-chat step.
-This is the honest weak spot of the channel; until it closes, a site with a logged-in audience gets
-better identity resolution by passing the number it already knows to `start({ phone })`.
+A visitor is anonymous until they give a name or a number — or until your site signs them in with
+`identify({ userId, userHash })`, where `userHash` is an HMAC of the user's id **computed on your own
+server** with the inbox's identity secret. The secret never goes in a page. See
+[docs/CHAT.md](docs/CHAT.md#signed-in-users).
 
 ### React, roughly
 

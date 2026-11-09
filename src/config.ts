@@ -1,3 +1,4 @@
+import type { CnctUploader } from './chat/attachments.js';
 import { CnctError, CnctErrorCode } from './errors.js';
 
 /** The version this SDK reports in its `User-Agent`. Kept in step with `package.json`. */
@@ -86,6 +87,12 @@ export interface CnctConfigInput {
    * ```
    */
   WebSocket?: CnctWebSocketFactory;
+  /**
+   * How a chat attachment is uploaded. Defaults to `XMLHttpRequest` in a browser — the only request
+   * there that reports upload progress — and to `fetch` with a streamed body everywhere else. Pass
+   * one for a test, a fake CNCT, or an upload queue of your own.
+   */
+  uploader?: CnctUploader;
 }
 
 /**
@@ -111,6 +118,7 @@ export class CnctConfig {
   readonly logger?: (level: CnctLogLevel, message: string, error?: unknown) => void;
   readonly fetch: CnctFetch;
   readonly webSocketFactory?: CnctWebSocketFactory;
+  readonly uploader?: CnctUploader;
 
   constructor(input: CnctConfigInput = {}) {
     // Absent means production. An empty string is not absent: it is a variable somebody meant to set.
@@ -129,6 +137,7 @@ export class CnctConfig {
     }
     this.fetch = input.fetch ?? ((url, init) => globalFetch(url, init));
     if (input.WebSocket) this.webSocketFactory = input.WebSocket;
+    if (input.uploader) this.uploader = input.uploader;
   }
 
   /**
@@ -153,6 +162,7 @@ export class CnctConfig {
       logger: changes.logger ?? this.logger,
       fetch: changes.fetch ?? this.fetch,
       WebSocket: changes.WebSocket ?? this.webSocketFactory,
+      uploader: changes.uploader ?? this.uploader,
     });
   }
 

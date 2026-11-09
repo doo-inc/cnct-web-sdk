@@ -49,6 +49,24 @@ export {
 
 export { CnctChatClient, type CnctChatClientOptions } from './chat/chat-client.js';
 export type * from './chat/types.js';
+export { CNCT_WIDGET_DEFAULTS, mergeWidget } from './chat/widget.js';
+export {
+  CnctAttachmentLimits,
+  attachmentMimeType,
+  attachmentProblem,
+  defaultImageTranscoder,
+  defaultUploader,
+  fetchUploader,
+  isHeic,
+  prepareAttachment,
+  xhrUploader,
+  type CnctFileLike,
+  type CnctImageTranscoder,
+  type CnctPreparedAttachment,
+  type CnctUploadRequest,
+  type CnctUploadResponse,
+  type CnctUploader,
+} from './chat/attachments.js';
 
 export { CnctAgentClient, CnctBookings, CnctTickets } from './agent/agent-client.js';
 export type * from './agent/types.js';
