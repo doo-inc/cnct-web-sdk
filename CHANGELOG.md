@@ -65,8 +65,10 @@ and the same words in English and Arabic.
   - A failed message no longer vanishes, with its retry, when the socket reconnects and the
     transcript is read back.
   - A `429` with no code from the server is `rate_limited`.
-- **New client error codes**, raised before anything is sent: `too_many_files`, `file_too_large`,
-  `unsupported_file_type`, and `cancelled` for an aborted upload.
+- **Error codes for files**, the same as the iOS and Android SDKs': `too_many` (the eleventh file),
+  `too_large` (over 50 MB, before upload as after), `unsupported_type` (before upload, or a `415`/`422`)
+  and `attachments_disabled` (a `403` or `503` from the attachments endpoint, which never reads as a
+  dead session). And `cancelled` for an aborted upload.
 
 ### Unchanged
 

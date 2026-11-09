@@ -618,9 +618,10 @@ try {
 `invalid`, `rate_limited`, `too_large`, `conversation_closed`, `conversation_changed`,
 `unauthenticated`, `conflict` and `server_error` come from the platform. `offline`, `timeout`,
 `no_session`, `empty`, `not_found`, `bad_response`, `missing_credential`, `request_failed` and
-`tool_refused` are this client's, as are `too_many_files`, `file_too_large` and
-`unsupported_file_type`, said about a file before anything is uploaded, and `cancelled` for an upload
-you aborted. A refusal keeps the server's whole body on `error.details` — a refused tool call carries
+`tool_refused` are this client's. About files there are `too_many` (the eleventh), `too_large`
+(over 50 MB), `unsupported_type` and `attachments_disabled` (the inbox takes no files) — said before
+anything is uploaded where they can be, and the same codes on the iOS and Android SDKs — and
+`cancelled` for an upload you aborted. A refusal keeps the server's whole body on `error.details` — a refused tool call carries
 everything the tool answered, a validation failure carries the fields.
 
 ---
