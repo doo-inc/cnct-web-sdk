@@ -1,7 +1,7 @@
 {
   "name": "cnct-web-sdk",
-  "version": "0.2.0",
-  "description": "The official CNCT SDK for browsers and Node — live chat, bookings and tickets against a CNCT workspace, using the credentials CNCT issues you.",
+  "version": "1.0.0",
+  "description": "The official CNCT SDK for browsers and Node — live chat (headless, or a ready-made brandable chat UI in English and Arabic), bookings and tickets against a CNCT workspace, using the credentials CNCT issues you.",
   "type": "module",
   "license": "BSD-3-Clause",
   "author": "DOO Inc",
@@ -14,11 +14,15 @@
   },
   "homepage": "https://github.com/doo-inc/cnct-web-sdk#readme",
   "keywords": [
-    "cnct",
-    "doo",
+    "arabic",
     "chat",
+    "chat-ui",
+    "cnct",
     "customer-support",
+    "doo",
+    "rtl",
     "sdk",
+    "web-component",
     "websocket"
   ],
   "engines": {
@@ -61,13 +65,17 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "format": "prettier --write .",
-    "format:check": "prettier --check ."
+    "format:check": "prettier --check .",
+    "screenshots": "node scripts/screenshots.mjs",
+    "size": "node scripts/size.mjs",
+    "strings": "node scripts/strings.mjs"
   },
   "devDependencies": {
     "@types/node": "^22.15.0",
     "@types/ws": "^8.5.0",
     "esbuild": "^0.25.0",
     "happy-dom": "^21.0.4",
+    "playwright": "^1.63.0",
     "prettier": "^3.5.0",
     "typescript": "^5.8.0",
     "vite": "^7.3.7",

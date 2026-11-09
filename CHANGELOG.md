@@ -1,5 +1,80 @@
 # Changelog
 
+## 1.0.0
+
+The first release with a chat interface of its own, released together with the iOS and Android SDKs
+from one shared spec (`docs/chat-ui/SPEC.md`). All three have the same options, the same theme tokens
+and the same words in English and Arabic.
+
+### A ready-made chat UI: `cnct-web-sdk/ui`
+
+- **`<cnct-chat>`**, a framework-free custom element in its own Shadow DOM, registered by
+  `defineCnctChat()`, and **`mountChat(element, options)`**, which returns `{ update, destroy }`. The
+  options are `client` (a chat client or a public key), `theme`, `language`, `strings`, `identity`,
+  `onClose` and `onEvent`. It has no runtime dependencies, and importing it touches no browser
+  global, so it is safe where pages are rendered on a server.
+- **Brandable.** The theme has these tokens: `primary`, `onPrimary`, `background`, `surface`, `text`,
+  `textMuted`, `border`, the two bubble pairs, `cornerRadius`, `font`, `logo`, `title`, `appearance`
+  and `showPoweredBy`.
+  - Light and dark each have their own colours.
+  - Precedence: what the app passes, then the inbox's widget settings in the CNCT console, then the
+    defaults.
+  - Every token is also a `--cnct-*` CSS custom property on the element.
+- **English and Arabic**, every word of the interface, from the table the three SDKs share.
+  - Arabic mirrors the whole screen.
+  - Each piece of user text takes its own direction.
+  - Phone numbers, emails and links stay left to right.
+  - Digits are Latin.
+- **Attachments both ways.**
+  - In: by picker, drag and drop, or paste, as chips with a progress ring. Count, size and type are
+    checked before anything is uploaded.
+  - Out: images inline with a full-screen viewer; other files as cards that download under their
+    original name.
+- **The conversation view of CNCT's hosted chat page:**
+  - Grouped messages, with faces and first names.
+  - Flow choices and the assistant's suggestions.
+  - Typing, pending, failed and retry; the offline banner; Seen.
+  - Read receipts, the name card, ending, and the rating card.
+- **`cnct-web-sdk/ui/fixture`**, the scripted conversation every platform renders for its tests and
+  screenshots, through a fake transport and socket.
+
+### The rest of the visitor API, in the headless client
+
+- `boot()` returns the inbox's `widget` settings, merged over `CNCT_WIDGET_DEFAULTS`, its `team` and
+  its `availability`.
+- **Files:**
+  - `upload(file, { onProgress, signal })` checks the file, converts HEIC to JPEG, downscales photos
+    over 2560 px, and reports progress: `XMLHttpRequest` in a browser, a streamed `fetch` in Node.
+  - `send(body, { attachments, attachmentIds })` sends words, files or both.
+  - `checkAttachment`, `CnctAttachmentLimits`, `prepareAttachment`, and `uploader` and
+    `imageTranscoder` to replace the defaults.
+- **`replyId`**, and `choose(choice)` for a tapped flow choice. `retry()` resends the same files and
+  choice.
+- **`identify({ userId, userHash, … })`** for signed-in users. The anonymous conversation moves
+  across.
+- **More calls:** `listConversations()`, `getConversation(id)`, `read()` (once per reply), `rate()`,
+  `updateProfile()` and `ensureSession()`.
+- **Frames:** `chat.message.updated` replaces a message in place (`messageUpdated`); `chat.read` sets
+  `conversation.seenAt` (`read`). A partial `chat.conversation.updated` is merged.
+- **`timezone`** goes with session start and resume.
+- **The full message model:** `sender`, `flow`, `suggestions` and `replyTo`; and on conversations
+  `id`, `assignee`, `rating`, `ratable`, `closedAt` and `seenAt`.
+- **Ending:** `end()` and a `chat.closed` frame mark the conversation `CLOSED` at once, then read back
+  whether it can be rated.
+- **Fixes:**
+  - A failed message no longer vanishes, with its retry, when the socket reconnects and the
+    transcript is read back.
+  - A `429` with no code from the server is `rate_limited`.
+- **New client error codes**, raised before anything is sent: `too_many_files`, `file_too_large`,
+  `unsupported_file_type`, and `cancelled` for an aborted upload.
+
+### Unchanged
+
+- `dist/hosted/cnct-chat.js`, served at `/sdk/v1/cnct-chat.js`, builds as before and exports what it
+  always did. It carries the new client methods, and is 27.3 kB minified (9.2 kB gzipped), up from
+  13.8 kB.
+- Nothing in 0.2.0's API was removed or renamed. See [docs/MIGRATING.md](docs/MIGRATING.md).
+
 ## 0.2.0
 
 - **The host defaults to production, `https://app.doo.ooo`.** `baseUrl` is optional on `Cnct`,

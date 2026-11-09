@@ -2,7 +2,7 @@ import type { CnctUploader } from './chat/attachments.js';
 import { CnctError, CnctErrorCode } from './errors.js';
 
 /** The version this SDK reports in its `User-Agent`. Kept in step with `package.json`. */
-export const SDK_VERSION = '0.2.0';
+export const SDK_VERSION = '1.0.0';
 
 /**
  * The CNCT hosts this SDK knows about by name.

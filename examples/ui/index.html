@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>CNCT chat UI — example</title>
+    <!--
+      The chat interface from `cnct-web-sdk/ui`, with switches for language, appearance and a custom
+      theme. With no `key` it runs the fixture: the scripted conversation every CNCT platform renders,
+      through a fake transport and socket, so it needs no account and sends nothing anywhere.
+
+        npm run build && npx serve .          then open /examples/ui/
+        /examples/ui/?key=your-inbox-public-key&host=https://app.doo.ooo     a real inbox
+
+      The font is only for the custom theme: a typeface that is visibly not the system's, with Arabic.
+    -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700&display=swap"
+    />
+    <style>
+      :root {
+        color-scheme: light dark;
+        font:
+          15px/1.4 system-ui,
+          sans-serif;
+      }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: grid;
+        grid-template-rows: auto 1fr;
+        background: #e9ebef;
+      }
+      @media (prefers-color-scheme: dark) {
+        body {
+          background: #050608;
+          color: #eef0f3;
+        }
+      }
+      .bar {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px 20px;
+        align-items: center;
+        justify-content: center;
+        padding: 12px 16px;
+      }
+      .bar label {
+        display: flex;
+        gap: 6px;
+        align-items: center;
+      }
+      .stage {
+        display: grid;
+        place-items: center;
+        padding: 0 16px 24px;
+      }
+      .phone {
+        width: min(420px, 100%);
+        height: min(860px, calc(100vh - 90px));
+        border-radius: 22px;
+        overflow: hidden;
+        box-shadow: 0 10px 40px #0003;
+      }
+      /* Screenshot mode: the component and nothing else, filling the page. */
+      body.shot {
+        display: block;
+        background: none;
+      }
+      body.shot .bar {
+        display: none;
+      }
+      body.shot .stage {
+        padding: 0;
+      }
+      body.shot .phone {
+        width: 100vw;
+        height: 100vh;
+        border-radius: 0;
+        box-shadow: none;
+      }
+    </style>
+  </head>
+  <body>
+    <form class="bar" id="bar">
+      <label>
+        Language
+        <select name="lang">
+          <option value="auto">Auto</option>
+          <option value="en">English</option>
+          <option value="ar">العربية</option>
+        </select>
+      </label>
+      <label>
+        Appearance
+        <select name="appearance">
+          <option value="system">System</option>
+          <option value="light">Light</option>
+          <option value="dark">Dark</option>
+        </select>
+      </label>
+      <label><input type="checkbox" name="theme" value="custom" /> Custom theme</label>
+    </form>
+    <main class="stage"><div class="phone" id="chat"></div></main>
+
+    <script type="module">
+      import { mountChat } from '../../dist/ui/index.js';
+      import { createChatFixture, fixtureFiles } from '../../dist/ui/fixture.js';
+
+      const params = new URLSearchParams(location.search);
+      const bar = document.getElementById('bar');
+      bar.lang.value = params.get('lang') ?? 'auto';
+      bar.appearance.value = params.get('appearance') ?? 'system';
+      bar.theme.checked = params.get('theme') === 'custom';
+      if (params.has('shot')) document.body.classList.add('shot');
+
+      /** A brand that is nobody's: red, square-ish corners, a typeface that is not the system's, a logo. */
+      const custom = {
+        primary: '#D7262E',
+        cornerRadius: 8,
+        font: '"Cairo", system-ui, sans-serif',
+        logo: new URL('./logo.svg', import.meta.url).href,
+      };
+
+      let filesAdded = false;
+      const options = () => {
+        const language = bar.lang.value;
+        const appearance = bar.appearance.value;
+        return {
+          language,
+          theme: { ...(bar.theme.checked ? custom : {}), appearance },
+          onEvent: (event) => {
+            console.log('[cnct event]', event.type, event);
+            // For the screenshots: two files picked and on their way up, a photo and a document.
+            if (event.type === 'opened' && params.has('files') && !filesAdded) {
+              filesAdded = true;
+              chat.element.addFiles(fixtureFiles());
+            }
+          },
+        };
+      };
+
+      const key = params.get('key');
+      const fixtureLanguage = () =>
+        bar.lang.value === 'ar' ||
+        (bar.lang.value === 'auto' && navigator.language.toLowerCase().startsWith('ar'))
+          ? 'ar'
+          : 'en';
+      const still = params.has('shot');
+      // Which moment of the fixture to open on: the conversation, the same one ended, or a newcomer.
+      const state = params.get('state') ?? 'conversation';
+      const client = key
+        ? key
+        : await createChatFixture({ language: fixtureLanguage(), still, state });
+      const chat = mountChat(document.getElementById('chat'), {
+        client,
+        ...(params.get('host') ? { baseUrl: params.get('host') } : {}),
+        ...options(),
+      });
+
+      if (bar.theme.checked) await document.fonts.load('16px "Cairo"').catch(() => {});
+
+      let shownLanguage = bar.lang.value;
+      bar.addEventListener('change', async () => {
+        const next = new URL(location.href);
+        next.searchParams.set('lang', bar.lang.value);
+        next.searchParams.set('appearance', bar.appearance.value);
+        if (bar.theme.checked) next.searchParams.set('theme', 'custom');
+        else next.searchParams.delete('theme');
+        history.replaceState(null, '', next);
+        // The fixture's own words are in one language, so a different one is a different fixture.
+        if (!key && bar.lang.value !== shownLanguage) {
+          chat.update({
+            ...options(),
+            client: await createChatFixture({ language: fixtureLanguage(), still, state }),
+          });
+        } else chat.update(options());
+        shownLanguage = bar.lang.value;
+      });
+
+      window.cnctChat = chat;
+    </script>
+  </body>
+</html>
