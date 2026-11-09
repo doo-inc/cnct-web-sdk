@@ -230,14 +230,14 @@ describe('uploading a file', () => {
     const chat = clientFor(cnct);
     await chat.start({ displayName: 'Layla' });
 
-    expect(chat.checkAttachment(file(1, 'a.png', 'image/png'), 10)?.code).toBe('too_many_files');
+    expect(chat.checkAttachment(file(1, 'a.png', 'image/png'), 10)?.code).toBe('too_many');
     const huge = { size: CnctAttachmentLimits.maxBytes + 1, type: 'video/mp4', name: 'film.mp4' };
-    expect(chat.checkAttachment(huge)?.code).toBe('file_too_large');
+    expect(chat.checkAttachment(huge)?.code).toBe('too_large');
     expect(chat.checkAttachment(huge)?.message).toBe('film.mp4 is over 50 MB.');
     await expect(
       chat.upload(file(10, 'setup.exe', 'application/x-msdownload')),
     ).rejects.toMatchObject({
-      code: 'unsupported_file_type',
+      code: 'unsupported_type',
     });
     expect(
       chat.checkAttachment({ size: CnctAttachmentLimits.maxBytes, type: 'video/mp4' }),
@@ -256,11 +256,12 @@ describe('uploading a file', () => {
   });
 
   it.each([
-    [403, 'This inbox does not take files.', 'invalid'],
+    [403, 'This inbox does not take files.', 'attachments_disabled'],
     [409, 'This conversation has ended.', 'conversation_closed'],
     [413, 'That file is too big.', 'too_large'],
-    [422, 'That kind of file is not accepted.', 'invalid'],
-    [503, 'This deployment keeps no files.', 'server_error'],
+    [415, 'That kind of file is not accepted.', 'unsupported_type'],
+    [422, 'That kind of file is not accepted.', 'unsupported_type'],
+    [503, 'This deployment keeps no files.', 'attachments_disabled'],
     [401, 'Unauthenticated', 'unauthenticated'],
   ])(
     'maps a %i refusal to a stable code and keeps the sentence',
@@ -316,10 +317,10 @@ describe('preparing a photo', () => {
     const chat = clientFor(cnct, { imageTranscoder: null });
     await chat.start({ displayName: 'Layla' });
     expect(chat.checkAttachment({ size: 10, type: 'image/heic', name: 'a.heic' })?.code).toBe(
-      'unsupported_file_type',
+      'unsupported_type',
     );
     await expect(chat.upload(file(10, 'a.heic', 'image/heic'))).rejects.toMatchObject({
-      code: 'unsupported_file_type',
+      code: 'unsupported_type',
     });
     expect(cnct.uploads).toHaveLength(0);
     chat.disconnect();
@@ -332,7 +333,7 @@ describe('preparing a photo', () => {
           throw new Error('cannot decode');
         },
       }),
-    ).rejects.toMatchObject({ code: 'unsupported_file_type' });
+    ).rejects.toMatchObject({ code: 'unsupported_type' });
   });
 
   it('downscales a large JPEG and sends a small one untouched', async () => {
@@ -520,7 +521,7 @@ describe('sending files and choices', () => {
     await expect(chat.send('  ', { attachmentIds: [] })).rejects.toMatchObject({ code: 'empty' });
     const eleven = Array.from({ length: 11 }, (_, i) => `att_${i}`);
     await expect(chat.send('hi', { attachmentIds: eleven })).rejects.toMatchObject({
-      code: 'too_many_files',
+      code: 'too_many',
     });
     await expect(chat.send('x'.repeat(4001))).rejects.toMatchObject({ code: 'too_large' });
     expect(cnct.requests.some((r) => r.path === '/api/chat/public/messages')).toBe(false);
