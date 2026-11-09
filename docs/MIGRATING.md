@@ -58,6 +58,26 @@ matters to you.
 
 ---
 
+# From 0.2.x to 1.0.0
+
+Nothing to change. 1.0 adds to 0.2; nothing was removed or renamed. Four things behave differently,
+and only one of them could matter to code you already have:
+
+- **A `429` without a server code is now `rate_limited`**, where it was `request_failed`. CNCT has
+  always sent `rate_limited` itself, so this only shows behind a proxy that answers `429` on its own —
+  and there, `rate_limited` is the right answer.
+- **`boot()` returns more.** The inbox now carries `widget`, `team` and `availability`, and `widget`
+  is never partial: it is merged over `CNCT_WIDGET_DEFAULTS`.
+- **The client sends the device's time zone** with session start and resume, so the team's times are
+  in the visitor's clock.
+- **A failed message survives a reconnect.** It used to vanish when the transcript was read back; it
+  now stays, still marked failed, until it is retried.
+
+To use the new interface, import `cnct-web-sdk/ui` — see [UI.md](UI.md). To keep your own, the new
+calls are in the [README](../README.md#chat).
+
+---
+
 # From 0.1.x to 0.2.0
 
 ## The operator token and contacts are gone

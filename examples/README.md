@@ -1,13 +1,29 @@
 # Examples
 
-Four, across the two credentials.
+Five, across the two credentials.
 
 |                                            |                                            |                    |
 | ------------------------------------------ | ------------------------------------------ | ------------------ |
+| [`ui/index.html`](ui/index.html)           | The ready-made chat UI, with switches      | Inbox key, or none |
 | [`browser/index.html`](browser/index.html) | A whole chat interface, no build step      | Inbox public key   |
 | [`react/Chat.jsx`](react/Chat.jsx)         | The same thing as a component              | Inbox public key   |
 | [`node/bookings.mjs`](node/bookings.mjs)   | Availability → booking, server-side        | `kaer_sk_` API key |
 | [`node/tickets.mjs`](node/tickets.mjs)     | Raise a ticket, then read and follow it up | `kaer_sk_` API key |
+
+The UI example is `cnct-web-sdk/ui` with switches for language, appearance and a custom theme. With no
+key it runs **the fixture**: the scripted conversation every CNCT platform renders for its screenshots,
+through a fake transport and socket, so it needs no account and sends nothing anywhere. It imports the
+built package, so build first and serve the repository's root:
+
+```bash
+npm run build && npx serve .
+```
+
+```
+http://localhost:3000/examples/ui/                                       the fixture
+http://localhost:3000/examples/ui/?lang=ar&appearance=dark&theme=custom  …in Arabic, dark, custom theme
+http://localhost:3000/examples/ui/?key=your-public-key                   a real inbox
+```
 
 The browser example loads the SDK straight from the CNCT host, so it needs nothing installed — open it
 with your host and inbox key in the URL:

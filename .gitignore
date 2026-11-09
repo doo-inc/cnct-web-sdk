@@ -7,3 +7,6 @@ dist/
 .vscode/
 *.swp
 .DS_Store
+
+# What `npm run screenshots` writes; CI uploads them as an artifact instead.
+screenshots/

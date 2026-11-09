@@ -1,30 +1,67 @@
 # CNCT for the web
 
-The official CNCT SDK for browsers and Node. Live chat, the calendar and tickets — against a CNCT
+The official CNCT SDK for browsers and Node: live chat, the calendar and tickets, against a CNCT
 workspace, using the credentials CNCT issues you.
 
-**It is headless, and that is the whole point.** There is no DOM in this package, not one element and
-not one style rule. A business building their own site has a design system already; shipping them a
-chat bubble to restyle answers a question they did not ask. So this ships state and events, and the
-interface is yours. [`examples/`](examples) has a working one in about a hundred lines you own and
-can delete.
+It comes in two layers, and you can stop at either:
 
-It has no runtime dependencies and no framework, so the same package runs in a browser, in Node, in a
-service worker and in a one-file script.
+- **`cnct-web-sdk/ui`** is a ready-made chat screen a business can brand: colours, font, corners,
+  logo, light and dark, and its own wording. It speaks English and Arabic and sends files both ways.
+  It is one framework-free custom element in its own Shadow DOM, so it drops into React, Vue, Svelte,
+  a server-rendered page or none of those.
+- **`cnct-web-sdk`** is the headless client the screen is built on: state and events, and no DOM at
+  all. A business with a design system of its own builds its own interface on it. The UI uses only
+  this client's public API, so anything the UI does, your interface can do too.
 
-> **Want a ready-made chat screen instead?** `cnct-web-sdk/ui` is one: a framework-free
-> `<cnct-chat>` element on this same client, brandable, in English and Arabic — see
-> [docs/UI.md](docs/UI.md). The headless package itself still has no DOM in it.
+There are no runtime dependencies and no framework. The headless client runs in a browser, in Node, in
+a service worker and in a one-file script.
 
 > **Just want a chat bubble on your site?** You do not need any of this. In the CNCT console, open
 > the inbox, go to Widget, and paste the one line it gives you — see [the widget](#the-drop-in-widget).
 
 ---
 
+## Chat UI in 10 lines
+
+```js
+import { mountChat } from 'cnct-web-sdk/ui';
+
+mountChat(document.querySelector('#support'), {
+  client: 'your-inbox-public-key', // the inbox's public key, from the CNCT console
+  theme: { primary: '#D7262E', cornerRadius: 8, logo: '/logo.svg' },
+  language: 'auto', // or 'en' / 'ar'
+  identity: await fetch('/cnct-identity').then((r) => r.json()), // optional: a signed-in user
+  onClose: () => supportPanel.hide(), // optional: draws a close button in the header
+  onEvent: (event) => analytics.track(`chat ${event.type}`), // optional
+});
+```
+
+Give `#support` a height; the chat fills it. Or use the element, with no script of your own beyond
+registering it:
+
+```html
+<cnct-chat public-key="your-inbox-public-key" language="ar" style="height: 600px"></cnct-chat>
+<script type="module">
+  import { defineCnctChat } from 'cnct-web-sdk/ui';
+  defineCnctChat();
+</script>
+```
+
+Without a theme, the screen takes the colour, logo, language and light or dark from the inbox's Widget
+settings in the CNCT console. So a business can brand it there with no code, and change it later
+without a release.
+
+To see it without an account, run [`examples/ui`](examples/ui). It runs a scripted conversation with
+no key and no network, and has switches for language, appearance and a custom theme.
+
+[docs/UI.md](docs/UI.md) has everything below in more depth.
+
+---
+
 ## Install
 
 ```bash
-npm install github:doo-inc/cnct-web-sdk#v0.2.0
+npm install github:doo-inc/cnct-web-sdk#v1.0.0
 ```
 
 Pin a tag rather than `main` — [the latest is here](https://github.com/doo-inc/cnct-web-sdk/releases/latest).
@@ -35,10 +72,10 @@ Where there is no `git` — an Alpine container, most CI images — npm cannot r
 dependency at all. Every release attaches a packed tarball for exactly that case:
 
 ```bash
-npm install https://github.com/doo-inc/cnct-web-sdk/releases/download/v0.2.0/cnct-web-sdk-0.2.0.tgz
+npm install https://github.com/doo-inc/cnct-web-sdk/releases/download/v1.0.0/cnct-web-sdk-1.0.0.tgz
 ```
 
-For a page with no build step, the CNCT host serves a bundled copy of exactly this package:
+For a page with no build step, the CNCT host serves a bundled copy of the headless chat client:
 
 ```html
 <script type="module">
@@ -46,7 +83,145 @@ For a page with no build step, the CNCT host serves a bundled copy of exactly th
 </script>
 ```
 
-The two are the same code. The difference is one default, and it is the next section.
+The two are the same code. The difference is one default, and it is [the host](#the-host).
+
+`cnct-web-sdk/ui` adds 23 kB gzipped to a page, or 32 kB with the headless chat client it brings. An
+app that imports only `cnct-web-sdk` pays nothing for it.
+
+---
+
+## Theming
+
+**Precedence: what the app passes, then the inbox's Widget settings in the CNCT console, then the
+built-in defaults**, token by token. An app that sets only `primary` still gets the console's logo.
+
+| Token                               | What it colours or sets                   | Default                                            |
+| ----------------------------------- | ----------------------------------------- | -------------------------------------------------- |
+| `primary`                           | the send button, links, the header's mark | the inbox's brand colour, else `#b52d93`           |
+| `onPrimary`                         | text and icons on `primary`               | black or white, whichever is readable              |
+| `background`                        | the screen                                | light `#ffffff`, dark `#0f1115`                    |
+| `surface`                           | the header, the composer, cards           | light `#f6f7f9`, dark `#171a21`                    |
+| `text`                              | main text                                 | light `#111418`, dark `#eef0f3`                    |
+| `textMuted`                         | timestamps, hints                         | light `#5b6573`, dark `#9aa3af`                    |
+| `border`                            | dividers, outlines                        | light `#e3e6ea`, dark `#2a2f38`                    |
+| `visitorBubble` / `onVisitorBubble` | the visitor's own messages                | `primary` / `onPrimary`                            |
+| `agentBubble` / `onAgentBubble`     | the team's and the assistant's messages   | `surface` / `text`                                 |
+| `cornerRadius`                      | bubbles and cards, in pixels              | 18                                                 |
+| `font`                              | a CSS `font-family`                       | the system's                                       |
+| `logo`                              | the header image                          | the inbox's logo, else the business's first letter |
+| `title`                             | the header title                          | the business's name                                |
+| `appearance`                        | `light`, `dark` or `system`               | the inbox's appearance                             |
+| `showPoweredBy`                     | the "Powered by CNCT" line                | the inbox's setting                                |
+
+Light and dark each have their own colours. A colour at the top level applies to both appearances;
+`light: { … }` and `dark: { … }` set colours for one only:
+
+```js
+theme: { primary: '#D7262E', dark: { primary: '#FF6B6B', background: '#121212' } }
+```
+
+The same tokens are CSS custom properties on the element, kebab case, so a stylesheet can theme it
+without JavaScript:
+
+```css
+cnct-chat {
+  --cnct-primary: #d7262e;
+  --cnct-corner-radius: 8px;
+  --cnct-font: 'Cairo', system-ui, sans-serif;
+}
+```
+
+Every word is yours to change too, per language, by its key in
+[the shared string table](docs/chat-ui/strings.json):
+
+```js
+strings: { en: { writeMessage: 'Ask us anything…' }, ar: { writeMessage: 'اسألنا عن أي شيء…' } }
+```
+
+---
+
+## Arabic and right to left
+
+- **Every word of the interface is in English and Arabic.** The table has 129 keys, shared word for
+  word with the iOS and Android SDKs. A missing Arabic word falls back to English, never to its key.
+- **`language: 'auto'`** takes the first of the browser's languages that is Arabic or English, else
+  English. Without a `language`, the inbox's own setting decides first.
+- **Arabic mirrors the whole screen**: the header, the composer, which side bubbles sit on, the send
+  icon, the progress ring. The visitor's own messages sit on the trailing side in both directions. It
+  is done by `dir="rtl"` on the screen's root and logical CSS throughout, not by swapped margins.
+- **Each piece of user text takes its own direction** (`dir="auto"`), whatever the interface's
+  language: messages, names, the greeting, choices, file names. An Arabic message in an English chat
+  reads right to left, and the reverse.
+- **Phone numbers, email addresses and links stay left to right** inside Arabic, so
+  `+973 3311 2233` is never drawn as `2233 3311 +973`.
+- **Digits are Latin in Arabic**, as Gulf apps write them: `9:41 ص`. Times and dates follow the
+  chosen language.
+- **The business's own words are shown as written.** Choosing a language never translates the
+  greeting or a flow's text.
+
+---
+
+## Attachments
+
+Customers send photos and files, and see what the team sends back.
+
+**The limits, which the server enforces and the SDK checks before uploading:**
+
+- up to **10 files** a message, **50 MB** each;
+- photos: JPEG, PNG, WebP and GIF;
+- audio: AAC, MP3, Ogg, M4A and AMR;
+- video: MP4, 3GP and QuickTime;
+- documents: PDF, Word (`.doc`, `.docx`), Excel (`.xlsx`), plain text and CSV.
+
+**HEIC is not accepted.** iPhones take photos in HEIC, so the SDK converts them to JPEG before upload,
+where the browser can decode them (Safari, where HEIC photos come from). It also downscales any photo
+over 2560 px on its long side, at JPEG quality 0.85, and never upscales. Other files go up untouched.
+
+In the UI, the paperclip opens the system's own picker, and files can also be dragged in or pasted.
+Each one shows as a chip with a progress ring. The eleventh file, a file over 50 MB, or a type not on
+the list is refused in a sentence, before anything is sent. Photos in the thread open full screen;
+other files download under their original name.
+
+Headless, it is two steps: upload each file, then send the message with them.
+
+```js
+const problem = chat.checkAttachment(file, alreadyPicked); // null, or a CnctError to show
+const attachment = await chat.upload(file, { onProgress: (fraction) => bar.set(fraction) });
+await chat.send('Here is the receipt', { attachments: [attachment] });
+```
+
+---
+
+## Signed-in users
+
+A visitor is anonymous until they give a name or a number. If your site or app has its own sign-in,
+tell CNCT who they are instead. Their conversations then follow them between devices and land on
+their customer record.
+
+Signing a user in takes a hash of their id, made with **the inbox's identity secret**. **The secret
+lives on your server and nowhere else.** It is not a public key. Whoever holds it can sign in as any of
+your customers and read their conversations, so it never goes in a page, an app, a bundle or a
+repository.
+
+On your server, for a user who is signed in to your site:
+
+```js
+import { createHmac } from 'node:crypto';
+
+// GET /cnct-identity — behind your own login.
+app.get('/cnct-identity', requireLogin, (req, res) => {
+  const userId = String(req.user.id);
+  const userHash = createHmac('sha256', process.env.CNCT_IDENTITY_SECRET)
+    .update(userId)
+    .digest('hex'); // lowercase hex
+  res.json({ userId, userHash, name: req.user.name, email: req.user.email });
+});
+```
+
+In the page, pass what it returns as `identity` to the UI, or to `chat.identify(identity)` headless.
+The call carries the visitor's current session, so a conversation they started before signing in
+comes with them. If the hash does not verify, or identity is not set up for the inbox, the failure is
+logged for you and the customer still gets a working anonymous chat.
 
 ---
 
@@ -269,12 +444,12 @@ what each card carries and what is deliberately not in it.
 
 ### Attachments
 
-A message may carry `attachments`. Fetching one needs the session token on a header, so **a plain
-`<img src>` will not work** — that is deliberate, because a credential in a query string ends up in
-referrers, logs and the address bar:
+A message may carry `attachments`, either way; [Attachments](#attachments) above covers sending them.
+Fetching one needs the session token on a header, so **a plain `<img src>` will not work** — that is
+deliberate, because a credential in a query string ends up in referrers, logs and the address bar:
 
 ```js
-const blob = await chat.fetchAttachment(attachment);
+const blob = await chat.fetchAttachment(attachment); // fetched once per id, however often you ask
 img.src = URL.createObjectURL(blob); // revoke it when the bubble unmounts
 ```
 
@@ -320,10 +495,9 @@ the time the constructor returns, so it is only worth awaiting if yours is not.
 
 ### Identity
 
-A visitor is anonymous until they give a name or a number — or until your site signs them in with
-`identify({ userId, userHash })`, where `userHash` is an HMAC of the user's id **computed on your own
-server** with the inbox's identity secret. The secret never goes in a page. See
-[docs/CHAT.md](docs/CHAT.md#signed-in-users).
+A visitor is anonymous until they give a name — `updateProfile({ displayName })`, or `start()` with
+one — or a number, or until your site signs them in with `identify()`. See
+[Signed-in users](#signed-in-users).
 
 ### React, roughly
 
@@ -444,8 +618,11 @@ try {
 `invalid`, `rate_limited`, `too_large`, `conversation_closed`, `conversation_changed`,
 `unauthenticated`, `conflict` and `server_error` come from the platform. `offline`, `timeout`,
 `no_session`, `empty`, `not_found`, `bad_response`, `missing_credential`, `request_failed` and
-`tool_refused` are this client's. A refusal keeps the server's whole body on `error.details` — a
-refused tool call carries everything the tool answered, a validation failure carries the fields.
+`tool_refused` are this client's. About files there are `too_many` (the eleventh), `too_large`
+(over 50 MB), `unsupported_type` and `attachments_disabled` (the inbox takes no files) — said before
+anything is uploaded where they can be, and the same codes on the iOS and Android SDKs — and
+`cancelled` for an upload you aborted. A refusal keeps the server's whole body on `error.details` — a refused tool call carries
+everything the tool answered, a validation failure carries the fields.
 
 ---
 
@@ -486,10 +663,18 @@ and an iframe is the only boundary the platform actually enforces.
 ## Working on the SDK
 
 ```bash
-npm install     # also builds, via `prepare`
-npm test        # against a mock CNCT — a real socket upgrade, real status codes
-npm run build   # dist/ for the package, dist/hosted/ for the file CNCT serves
+npm install              # also builds, via `prepare`
+npm test                 # against a mock CNCT — a real socket upgrade, real status codes
+npm run build            # dist/ for the package, dist/hosted/ for the file CNCT serves
+npm run screenshots      # the UI on the fixture, in Chromium: screenshots/*.png
+npm run size             # what cnct-web-sdk/ui costs a page, gzipped
 ```
+
+The UI's tests run in happy-dom against the same headless client, over a scripted CNCT in memory.
+CI also renders it in Chromium for ten screenshots: English and Arabic, light and dark, a custom
+theme, the end of a conversation and the name-first start. They are uploaded as the `screenshots`
+artifact of every run, and each run checks the direction, overflow, touch targets and the theme
+before it shoots.
 
 The tests run against a small mock platform in [`test/support/server.ts`](test/support/server.ts)
 rather than a stubbed `fetch`. Every bug this SDK has had lived in the seam between the socket, the
@@ -501,7 +686,9 @@ headers and the status codes, and a stubbed `fetch` is exactly the seam a stub c
 cannot deploy to it — whatever is at that URL is what their page loads on its next reload. A change to
 the shape of `createChatClient` becomes `/sdk/v2/` and leaves v1 where it is; only fixes land on v1.
 
-The package is tagged, and a tag is what you should install. `main` moves.
+The package is tagged, and a tag is what you should install. `main` moves. 1.0.0 is the first release
+with the UI, and it shipped together with the iOS and Android SDKs from one spec,
+[`docs/chat-ui/SPEC.md`](docs/chat-ui/SPEC.md).
 
 ## Licence
 
