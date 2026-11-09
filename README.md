@@ -12,6 +12,10 @@ can delete.
 It has no runtime dependencies and no framework, so the same package runs in a browser, in Node, in a
 service worker and in a one-file script.
 
+> **Want a ready-made chat screen instead?** `cnct-web-sdk/ui` is one: a framework-free
+> `<cnct-chat>` element on this same client, brandable, in English and Arabic — see
+> [docs/UI.md](docs/UI.md). The headless package itself still has no DOM in it.
+
 > **Just want a chat bubble on your site?** You do not need any of this. In the CNCT console, open
 > the inbox, go to Widget, and paste the one line it gives you — see [the widget](#the-drop-in-widget).
 
