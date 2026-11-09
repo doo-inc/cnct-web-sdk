@@ -2,16 +2,30 @@ import { CnctConfig, type CnctConfigInput } from '../config.js';
 import { CnctChatPublicKey } from '../credentials.js';
 import { CnctError, CnctErrorCode } from '../errors.js';
 import { asTokenStore, type CnctTokenStore, type StorageLike } from '../token-store.js';
+import {
+  CnctAttachmentLimits,
+  attachmentProblem,
+  defaultImageTranscoder,
+  defaultUploader,
+  prepareAttachment,
+  type CnctImageTranscoder,
+} from './attachments.js';
 import type {
   CnctChatAttachment,
   CnctChatConversation,
+  CnctChatConversationSummary,
   CnctChatEventName,
   CnctChatEvents,
+  CnctChatFlowChoice,
+  CnctChatIdentity,
   CnctChatInbox,
   CnctChatMessage,
   CnctChatSession,
   CnctChatState,
+  CnctChatTranscript,
+  CnctChatVisitor,
 } from './types.js';
+import { isObject, normaliseInbox } from './widget.js';
 
 /**
  * Live chat with a CNCT inbox, as a visitor.
@@ -80,6 +94,14 @@ export class CnctChatClient {
   private lastTypingSentAt = 0;
   private socketSendSupported = false;
   private closedByUs = false;
+  private starting: Promise<CnctChatSession> | null = null;
+  private readonly transcoder: CnctImageTranscoder | null;
+  /** What a failed send carried beside its words, so `retry` sends the same files and choice. */
+  private readonly outbox = new Map<string, { attachmentIds: string[]; replyId?: string }>();
+  /** Per conversation, the newest team reply already reported read — so each is reported once. */
+  private readonly reported = new Map<string, string>();
+  /** Each file's bytes, fetched once. A thread redrawn on every message must not refetch photos. */
+  private readonly files = new Map<string, Promise<Blob>>();
 
   constructor(options: CnctChatClientOptions) {
     this.config =
@@ -91,6 +113,8 @@ export class CnctChatClient {
     this.publicKey = credentials.publicKey;
     this.storageKey = options.storageKey ?? `cnct_chat_${this.publicKey}`;
     this.store = asTokenStore(options.tokenStore ?? options.storage);
+    this.transcoder =
+      options.imageTranscoder === undefined ? defaultImageTranscoder() : options.imageTranscoder;
 
     const initial = this.store.read(this.storageKey);
     if (isThenable(initial)) {
@@ -147,9 +171,9 @@ export class CnctChatClient {
    * and it is what tells you whether to draw a composer at all.
    */
   async boot(): Promise<CnctChatInbox> {
-    const inbox = (await this.request(
-      `/api/chat/public/${encodeURIComponent(this.publicKey)}`,
-    )) as CnctChatInbox;
+    const inbox = normaliseInbox(
+      await this.request(`/api/chat/public/${encodeURIComponent(this.publicKey)}`),
+    );
     this.patch({ inbox, error: null });
     return inbox;
   }
@@ -158,8 +182,11 @@ export class CnctChatClient {
    * Begin, or resume as the same person. Sending the stored token reuses that visitor rather than
    * minting a stranger, so somebody who chatted a week ago is still attached to their contact.
    */
-  async start(input: { displayName?: string; phone?: string } = {}): Promise<CnctChatSession> {
+  async start(
+    input: { displayName?: string; phone?: string; timezone?: string } = {},
+  ): Promise<CnctChatSession> {
     await this.ready;
+    const timezone = input.timezone ?? deviceTimeZone();
     const data = (await this.request(
       `/api/chat/public/${encodeURIComponent(this.publicKey)}/session`,
       {
@@ -167,12 +194,40 @@ export class CnctChatClient {
         body: JSON.stringify({
           displayName: input.displayName,
           ...(input.phone ? { phone: input.phone } : {}),
+          // The visitor's own clock, so "back tomorrow at 9" and every time the team sends are
+          // theirs rather than the business's.
+          ...(timezone ? { timezone } : {}),
         }),
       },
     )) as CnctChatSession;
-    this.adoptSession(data);
+    /**
+     * After a closed conversation this is a new one, for the same visitor — so the old transcript
+     * goes rather than being shown above a conversation it is not part of.
+     */
+    const fresh = this.state.status === 'ended' || this.state.conversation?.status === 'CLOSED';
+    this.adoptSession(fresh ? { ...data, messages: data.messages ?? [] } : data);
+    if (fresh) {
+      // The old socket was subscribed to the old conversation. Start the new one on a new socket.
+      this.disconnect();
+      this.patch({ status: 'idle', theyAreTyping: false });
+    }
+    this.reported.clear();
     this.connect();
     return data;
+  }
+
+  /**
+   * A conversation to write in, started now if there is none — the first message of a visitor who
+   * was let type before giving a name, or a file dropped before anything was said. A message and a
+   * file in the same moment share one start rather than racing to make two conversations.
+   */
+  ensureSession(input: { displayName?: string; phone?: string } = {}): Promise<CnctChatSession> {
+    if (this.token && this.canSend)
+      return Promise.resolve({ conversation: this.state.conversation ?? undefined });
+    this.starting ??= this.start(input).finally(() => {
+      this.starting = null;
+    });
+    return this.starting;
   }
 
   /** Pick up where a reload left off. Resolves to null when there is no session to pick up. */
@@ -180,7 +235,14 @@ export class CnctChatClient {
     await this.ready;
     if (!this.token) return null;
     try {
-      const data = (await this.request('/api/chat/public/session')) as CnctChatSession;
+      const timezone = deviceTimeZone();
+      const data = (await this.request(
+        '/api/chat/public/session',
+        {},
+        {
+          query: timezone ? { timezone } : {},
+        },
+      )) as CnctChatSession;
       this.adoptSession(data);
       if (data.conversation?.status === 'CLOSED') this.patch({ status: 'ended' });
       else this.connect();
@@ -196,13 +258,25 @@ export class CnctChatClient {
   }
 
   /**
-   * Say something. Resolves to the stored message once the server has it.
+   * Say something — words, files, or both. Resolves to the stored message once the server has it.
    *
    * The optimistic bubble goes in immediately and is replaced in place when the real row arrives —
    * matched on `clientKey`, which is also the frame id and also the server's idempotency key, so the
    * three can never disagree about which message this is.
+   *
+   * Files are uploaded first, each on its own, with {@link upload}; pass what it resolved to as
+   * `attachments` (the bubble can then draw them at once) or just their ids as `attachmentIds`.
+   * `replyId` is the id of a flow choice the visitor tapped — {@link choose} does that for you.
    */
-  async send(body: string, options: { clientKey?: string } = {}): Promise<CnctChatMessage> {
+  async send(
+    body: string,
+    options: {
+      clientKey?: string;
+      attachments?: CnctChatAttachment[];
+      attachmentIds?: string[];
+      replyId?: string;
+    } = {},
+  ): Promise<CnctChatMessage> {
     /**
      * Awaited only when there is nothing loaded yet, and that is load-bearing rather than a
      * micro-optimisation. An async function runs synchronously up to its first `await`, so skipping
@@ -213,7 +287,26 @@ export class CnctChatClient {
     const clientKey = options.clientKey ?? uid();
     if (!this.token) throw new CnctError('Start a conversation first.', CnctErrorCode.noSession);
     const text = String(body ?? '').trim();
-    if (!text) throw new CnctError('Nothing to send.', CnctErrorCode.empty);
+    const attachmentIds = [
+      ...new Set([
+        ...(options.attachments ?? []).map((a) => a.id),
+        ...(options.attachmentIds ?? []),
+      ]),
+    ];
+    // Words, files, or both — never neither. The server refuses an empty body with no files.
+    if (!text && !attachmentIds.length)
+      throw new CnctError('Nothing to send.', CnctErrorCode.empty);
+    if (text.length > 4000) {
+      throw new CnctError('A message can be up to 4,000 characters.', CnctErrorCode.tooLarge);
+    }
+    if (attachmentIds.length > CnctAttachmentLimits.maxFiles) {
+      throw new CnctError(
+        `Up to ${CnctAttachmentLimits.maxFiles} files at a time.`,
+        CnctErrorCode.tooManyFiles,
+      );
+    }
+    const extras = { attachmentIds, ...(options.replyId ? { replyId: options.replyId } : {}) };
+    this.outbox.set(clientKey, extras);
 
     const already = this.state.messages.find((m) => m.clientKey === clientKey);
     this.patch({
@@ -226,31 +319,43 @@ export class CnctChatClient {
             {
               id: `pending_${clientKey}`,
               speaker: 'CALLER',
+              sender: null,
               // Stamped even on the optimistic copy, so a UI may switch on `type` without ever
               // meeting an undefined — the server sends it on every message it returns.
               type: 'TEXT',
               body: text,
               createdAt: new Date().toISOString(),
               clientKey,
+              ...(options.attachments?.length ? { attachments: options.attachments } : {}),
               pending: true,
             } satisfies CnctChatMessage,
           ],
     });
 
+    const wire = {
+      body: text,
+      clientKey,
+      ...(attachmentIds.length ? { attachmentIds } : {}),
+      ...(extras.replyId ? { replyId: extras.replyId } : {}),
+    };
     try {
+      let message: CnctChatMessage;
       if (this.socket?.readyState === 1 && this.socketSendSupported) {
-        return await this.sendOverSocket({ type: 'send', id: clientKey, body: text, clientKey });
+        message = await this.sendOverSocket({ type: 'send', id: clientKey, ...wire });
+      } else {
+        /**
+         * The fallback, and it is a real path rather than a formality: it runs against a server
+         * that predates socket sends, and it runs whenever the socket happens to be between
+         * connections. Same endpoint the hosted page uses, same idempotency key.
+         */
+        message = (await this.request(
+          '/api/chat/public/messages',
+          { method: 'POST', body: JSON.stringify(wire) },
+          { codes: { 409: CnctErrorCode.conversationClosed } },
+        )) as CnctChatMessage;
+        this.absorb(message);
       }
-      /**
-       * The fallback, and it is a real path rather than a formality: it runs against a server that
-       * predates socket sends, and it runs whenever the socket happens to be between connections.
-       * Same endpoint the hosted page uses, same idempotency key.
-       */
-      const message = (await this.request('/api/chat/public/messages', {
-        method: 'POST',
-        body: JSON.stringify({ body: text, clientKey }),
-      })) as CnctChatMessage;
-      this.absorb(message);
+      this.outbox.delete(clientKey);
       return message;
     } catch (error) {
       this.markFailed(clientKey);
@@ -259,11 +364,97 @@ export class CnctChatClient {
     }
   }
 
-  /** Retry a message that failed. The same `clientKey`, so the server cannot write it twice. */
+  /**
+   * Retry a message that failed. The same `clientKey`, so the server cannot write it twice — and the
+   * same files and choice it was first sent with.
+   */
   retry(clientKey: string): Promise<CnctChatMessage> {
     const message = this.state.messages.find((m) => m.clientKey === clientKey);
     if (!message) throw new CnctError('No such message.', CnctErrorCode.notFound);
-    return this.send(message.body, { clientKey });
+    const extras = this.outbox.get(clientKey);
+    return this.send(message.body, {
+      clientKey,
+      ...(message.attachments?.length ? { attachments: message.attachments } : {}),
+      ...(extras?.attachmentIds.length ? { attachmentIds: extras.attachmentIds } : {}),
+      ...(extras?.replyId ? { replyId: extras.replyId } : {}),
+    });
+  }
+
+  /**
+   * The visitor tapped one of a flow's choices. Sent as their words — the title they tapped — with
+   * the choice's id as `replyId`, so the flow follows the button exactly rather than reading the
+   * title as typing.
+   */
+  choose(
+    choice: CnctChatFlowChoice,
+    options: { clientKey?: string } = {},
+  ): Promise<CnctChatMessage> {
+    return this.send(choice.title, { ...options, replyId: choice.id });
+  }
+
+  // ── Files ──────────────────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Why this file cannot be sent, before a byte of it is uploaded — or null when it can.
+   * `alreadyPicked` is how many are already waiting to go with the same message. See
+   * {@link attachmentProblem}.
+   */
+  checkAttachment(
+    file: { size: number; type: string; name?: string },
+    alreadyPicked = 0,
+  ): CnctError | null {
+    return attachmentProblem(file, { alreadyPicked, canConvertHeic: this.transcoder !== null });
+  }
+
+  /**
+   * Upload one file, for {@link send} to carry. Resolves to the stored attachment.
+   *
+   * Checked first (a refusal throws before anything is sent), then prepared — a HEIC photo becomes a
+   * JPEG and a large photo is downscaled; see {@link prepareAttachment} — then sent as one
+   * multipart part named `file`. `onProgress` is called with 0 to 1 as it goes up.
+   *
+   * Needs a session: call {@link ensureSession} first on a conversation nobody has started yet.
+   */
+  async upload(
+    file: Blob & { name?: string },
+    options: {
+      filename?: string;
+      onProgress?: (fraction: number) => void;
+      signal?: AbortSignal;
+    } = {},
+  ): Promise<CnctChatAttachment> {
+    await this.ready;
+    if (!this.token) throw new CnctError('Start a conversation first.', CnctErrorCode.noSession);
+    const filename = options.filename ?? file.name ?? 'file';
+    const problem = this.checkAttachment({ size: file.size, type: file.type, name: filename });
+    if (problem) throw problem;
+    const prepared = await prepareAttachment(file, { filename, transcoder: this.transcoder });
+    if (prepared.blob.size > CnctAttachmentLimits.maxBytes) {
+      throw new CnctError(`${prepared.filename} is over 50 MB.`, CnctErrorCode.fileTooLarge);
+    }
+
+    const uploader = this.config.uploader ?? defaultUploader(this.config.fetch);
+    const { status, body } = await uploader({
+      url: this.config.resolve('/api/chat/public/attachments'),
+      headers: { ...this.config.headers, 'x-chat-token': this.token },
+      file: prepared.blob,
+      filename: prepared.filename,
+      ...(options.onProgress ? { onProgress: options.onProgress } : {}),
+      ...(options.signal ? { signal: options.signal } : {}),
+    });
+    const data = isObject(body) ? body : {};
+    if (status >= 200 && status < 300 && isObject(data.attachment) && data.attachment.id) {
+      return data.attachment as unknown as CnctChatAttachment;
+    }
+    throw chatFailure(status, data, {
+      // The inbox takes no files: a refusal the visitor cannot fix by trying again.
+      403: CnctErrorCode.invalid,
+      409: CnctErrorCode.conversationClosed,
+      413: CnctErrorCode.tooLarge,
+      422: CnctErrorCode.invalid,
+      // The deployment keeps no files at all.
+      503: CnctErrorCode.serverError,
+    });
   }
 
   /** Tell the other side somebody is typing. Throttled here as well as on the server. */
@@ -283,6 +474,172 @@ export class CnctChatClient {
     this.closedByUs = true;
     this.patch({ status: 'ended' });
     this.disconnect();
+  }
+
+  // ── Who the visitor is ─────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Sign the visitor in as one of the business's own users, so their conversations follow them
+   * between devices and land on their contact record.
+   *
+   * `userHash` is `HMAC-SHA256(userId, the inbox's identity secret)` in lowercase hex, **computed on
+   * the business's own server** — the secret never goes in a page or an app. The current session
+   * token travels with the call, so a conversation the visitor started anonymously moves across, and
+   * the token the server answers with replaces it.
+   *
+   * Refusals: `409` (`conflict`) when identity is not set up for this inbox, `401`
+   * (`unauthenticated`) when the hash did not verify. **Neither forgets the anonymous session** — a
+   * visitor whose sign-in failed still has a working chat.
+   */
+  async identify(identity: CnctChatIdentity): Promise<CnctChatVisitor> {
+    await this.ready;
+    if (!identity?.userId || !identity?.userHash) {
+      throw new CnctError('identify() needs a userId and a userHash.', CnctErrorCode.invalid);
+    }
+    const data = (await this.request(
+      `/api/chat/public/${encodeURIComponent(this.publicKey)}/identify`,
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          userId: identity.userId,
+          userHash: identity.userHash,
+          ...(identity.name ? { name: identity.name } : {}),
+          ...(identity.email ? { email: identity.email } : {}),
+          ...(identity.phone ? { phone: identity.phone } : {}),
+        }),
+      },
+      { codes: { 409: CnctErrorCode.conflict } },
+    )) as { token?: string; visitor?: CnctChatVisitor };
+    const changed = Boolean(data.token && data.token !== this.token);
+    if (data.token) {
+      this.token = data.token;
+      this.persist(data.token);
+    }
+    const visitor = data.visitor ?? this.state.visitor ?? { displayName: '' };
+    this.patch({ visitor, error: null });
+    // A socket authenticated as the stranger is the stranger's. Reopen it as the person.
+    if (changed && this.socket) {
+      this.disconnect();
+      this.connect();
+    }
+    return visitor;
+  }
+
+  /**
+   * The visitor gives their name — the card a UI shows once an anonymous visitor has said something.
+   */
+  async updateProfile(input: { displayName: string; phone?: string }): Promise<CnctChatVisitor> {
+    await this.ready;
+    if (!this.token) throw new CnctError('Start a conversation first.', CnctErrorCode.noSession);
+    const displayName = String(input?.displayName ?? '').trim();
+    if (!displayName) throw new CnctError('A name is needed.', CnctErrorCode.invalid);
+    const data = (await this.request('/api/chat/public/profile', {
+      method: 'POST',
+      body: JSON.stringify({ displayName, ...(input.phone ? { phone: input.phone.trim() } : {}) }),
+    })) as { visitor?: CnctChatVisitor };
+    const visitor = data.visitor ?? {
+      ...(this.state.visitor ?? {}),
+      displayName,
+      anonymous: false,
+    };
+    this.patch({ visitor });
+    return visitor;
+  }
+
+  // ── Conversations ──────────────────────────────────────────────────────────────────────────────
+
+  /** Up to fifty of this visitor's conversations, newest first, each with its last message. */
+  async listConversations(): Promise<CnctChatConversationSummary[]> {
+    await this.ready;
+    if (!this.token) return [];
+    const data = (await this.request('/api/chat/public/conversations')) as {
+      visitor?: CnctChatVisitor;
+      conversations?: CnctChatConversationSummary[];
+    };
+    if (data.visitor) this.patch({ visitor: data.visitor });
+    return Array.isArray(data.conversations) ? data.conversations : [];
+  }
+
+  /**
+   * One of this visitor's conversations and its whole transcript — a past one, say. Read-only: the
+   * state, which is the live conversation, is left as it is.
+   */
+  async getConversation(id: string): Promise<CnctChatTranscript> {
+    await this.ready;
+    if (!this.token) throw new CnctError('Start a conversation first.', CnctErrorCode.noSession);
+    const data = (await this.request(
+      `/api/chat/public/conversations/${encodeURIComponent(id)}`,
+    )) as {
+      visitor?: CnctChatVisitor;
+      conversation: CnctChatConversation;
+      messages?: CnctChatMessage[];
+    };
+    if (data.visitor) this.patch({ visitor: data.visitor });
+    return { conversation: data.conversation, messages: data.messages ?? [] };
+  }
+
+  /**
+   * Tell the team the visitor has their replies on screen — the ticks in the console.
+   *
+   * Call it whenever a reply from the team is visible and the page is in the foreground; **it posts
+   * once per reply**: the newest reply reported is remembered, and nothing is sent again until a
+   * newer one arrives. A failed report is forgotten, so the next call tries again. Resolves to true
+   * when it posted.
+   */
+  async read(): Promise<boolean> {
+    const id = this.state.conversation?.id;
+    if (!this.token || !id) return false;
+    const reply = [...this.state.messages]
+      .reverse()
+      .find((m) => (m.speaker === 'OPERATOR' || m.speaker === 'AI') && m.id && !m.pending);
+    if (!reply || this.reported.get(id) === reply.id) return false;
+    this.reported.set(id, reply.id);
+    try {
+      await this.request(`/api/chat/public/conversations/${encodeURIComponent(id)}/read`, {
+        method: 'POST',
+      });
+      return true;
+    } catch (error) {
+      if (this.reported.get(id) === reply.id) this.reported.delete(id);
+      throw error;
+    }
+  }
+
+  /**
+   * Rate a closed conversation, 1 (terrible) to 5 (great), with an optional comment. Rating again
+   * replaces the score, which is how a comment added after the face is sent. Defaults to the
+   * current conversation.
+   *
+   * `409` (`conflict`) once it can no longer be rated.
+   */
+  async rate(
+    score: number,
+    options: { comment?: string; conversationId?: string } = {},
+  ): Promise<CnctChatConversation> {
+    await this.ready;
+    const id = options.conversationId ?? this.state.conversation?.id;
+    if (!this.token || !id) {
+      throw new CnctError('There is no conversation to rate.', CnctErrorCode.noSession);
+    }
+    if (!Number.isInteger(score) || score < 1 || score > 5) {
+      throw new CnctError('A rating is a whole number from 1 to 5.', CnctErrorCode.invalid);
+    }
+    const data = (await this.request(
+      `/api/chat/public/conversations/${encodeURIComponent(id)}/rating`,
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          score,
+          ...(options.comment !== undefined ? { comment: options.comment } : {}),
+        }),
+      },
+      { codes: { 409: CnctErrorCode.conflict } },
+    )) as { conversation?: CnctChatConversation };
+    const conversation = data.conversation ?? (this.state.conversation as CnctChatConversation);
+    if (this.state.conversation?.id === id) {
+      this.patch({ conversation: { ...this.state.conversation, ...conversation } });
+    }
+    return conversation;
   }
 
   /**
@@ -309,17 +666,30 @@ export class CnctChatClient {
   async fetchAttachment(attachment: CnctChatAttachment | string): Promise<Blob> {
     await this.ready;
     if (!this.token) throw new CnctError('Start a conversation first.', CnctErrorCode.noSession);
-    const response = await this.config.fetch(this.attachmentUrl(attachment), {
-      headers: { 'x-chat-token': this.token },
-    });
-    if (!response.ok) {
-      throw new CnctError(
-        response.status === 404 ? 'No such file.' : 'That file could not be fetched.',
-        response.status === 401 ? CnctErrorCode.unauthenticated : CnctErrorCode.requestFailed,
-        response.status,
-      );
-    }
-    return response.blob();
+    const id = typeof attachment === 'string' ? attachment : attachment.id;
+    const cached = this.files.get(id);
+    if (cached) return cached;
+    const token = this.token;
+    const fetching = (async () => {
+      const response = await this.config.fetch(this.attachmentUrl(id), {
+        headers: { ...this.config.headers, 'x-chat-token': token },
+      });
+      if (!response.ok) {
+        throw new CnctError(
+          response.status === 404 ? 'No such file.' : 'That file could not be fetched.',
+          response.status === 401 ? CnctErrorCode.unauthenticated : CnctErrorCode.requestFailed,
+          response.status,
+        );
+      }
+      return response.blob();
+    })();
+    /**
+     * Cached by id — any conversation of this visitor's, so a past chat's photos are the same
+     * entries. A failure is not remembered: the next look asks again.
+     */
+    this.files.set(id, fetching);
+    fetching.catch(() => this.files.delete(id));
+    return fetching;
   }
 
   // ── The socket ─────────────────────────────────────────────────────────────────────────────────
@@ -481,6 +851,33 @@ export class CnctChatClient {
         if (frame.payload?.message) this.absorb(frame.payload.message);
         this.emit('message', frame.payload?.message);
         return;
+      case 'chat.message.updated': {
+        /**
+         * A message changed after it was sent — edited, deleted, or a file on it finished storing.
+         * Replaced where it stands, by id: it keeps its place in the thread, and a message this
+         * client never had is not invented from an update.
+         */
+        const message = (frame.payload?.message ?? frame.payload) as CnctChatMessage | undefined;
+        if (!message?.id) return;
+        const at = this.state.messages.findIndex((m) => m.id === message.id);
+        if (at < 0) return;
+        const messages = this.state.messages.slice();
+        messages[at] = { ...messages[at], ...message, pending: false, failed: false };
+        delete messages[at].pending;
+        delete messages[at].failed;
+        this.patch({ messages });
+        this.emit('messageUpdated', messages[at]);
+        return;
+      }
+      case 'chat.read': {
+        const at = typeof frame.payload?.at === 'string' ? frame.payload.at : null;
+        if (!at) return;
+        if (this.state.conversation) {
+          this.patch({ conversation: { ...this.state.conversation, seenAt: at } });
+        }
+        this.emit('read', at);
+        return;
+      }
       case 'chat.typing': {
         this.patch({ theyAreTyping: true });
         if (this.typingClearTimer) clearTimeout(this.typingClearTimer);
@@ -488,10 +885,24 @@ export class CnctChatClient {
         this.emit('typing', true);
         return;
       }
-      case 'chat.conversation.updated':
-        if (frame.payload?.conversation) this.patch({ conversation: frame.payload.conversation });
-        this.emit('conversation', frame.payload?.conversation);
+      case 'chat.conversation.updated': {
+        /**
+         * Older servers send the whole conversation under `conversation`; newer ones send just what
+         * changed — `status`, `withPerson`, `assignee`. Either way it is merged, so a partial frame
+         * never wipes out what the client already knew.
+         */
+        const payload = isObject(frame.payload) ? frame.payload : {};
+        const changes = (isObject(payload.conversation) ? payload.conversation : payload) as
+          Partial<CnctChatConversation> | undefined;
+        if (!changes || !Object.keys(changes).length) return;
+        const conversation = {
+          ...(this.state.conversation ?? ({} as CnctChatConversation)),
+          ...changes,
+        } as CnctChatConversation;
+        this.patch({ conversation });
+        this.emit('conversation', conversation);
         return;
+      }
       case 'chat.closed':
         this.closedByUs = true;
         this.patch({
@@ -514,6 +925,8 @@ export class CnctChatClient {
     id: string;
     body: string;
     clientKey: string;
+    attachmentIds?: string[];
+    replyId?: string;
   }): Promise<CnctChatMessage> {
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
@@ -554,12 +967,16 @@ export class CnctChatClient {
 
   // ── HTTP ───────────────────────────────────────────────────────────────────────────────────────
 
-  private async request(path: string, init: RequestInit = {}): Promise<unknown> {
+  private async request(
+    path: string,
+    init: RequestInit = {},
+    options: { query?: Record<string, unknown>; codes?: Record<number, string> } = {},
+  ): Promise<unknown> {
     let response: Response;
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.config.connectTimeoutMs);
     try {
-      response = await this.config.fetch(this.config.resolve(path), {
+      response = await this.config.fetch(this.config.resolve(path, options.query), {
         ...init,
         signal: controller.signal,
         headers: {
@@ -581,19 +998,7 @@ export class CnctChatClient {
     }
 
     const data = (await response.json().catch(() => ({}))) as Record<string, unknown>;
-    if (!response.ok) {
-      const message = typeof data.error === 'string' ? data.error : 'Something went wrong.';
-      throw new CnctError(
-        message,
-        typeof data.code === 'string'
-          ? data.code
-          : response.status === 401
-            ? CnctErrorCode.unauthenticated
-            : CnctErrorCode.requestFailed,
-        response.status,
-        data,
-      );
-    }
+    if (!response.ok) throw chatFailure(response.status, data, options.codes);
     return data;
   }
 
@@ -673,11 +1078,49 @@ export class CnctChatClient {
 export interface CnctChatClientOptions {
   config: CnctConfig | CnctConfigInput;
   credentials: CnctChatPublicKey | string;
+  /**
+   * How a photo is converted (HEIC to JPEG) and downscaled before upload. Defaults to the browser's
+   * own decoder and a canvas; `null` sends every file exactly as picked, and refuses HEIC. Pass one
+   * in Node, which has no canvas, to convert there with an image library of your choice.
+   */
+  imageTranscoder?: CnctImageTranscoder | null;
   /** Where the visitor's session token lives. Defaults to `localStorage`, or memory where blocked. */
   tokenStore?: CnctTokenStore | StorageLike;
   /** The name the first version of this SDK used for {@link tokenStore}. */
   storage?: CnctTokenStore | StorageLike;
   storageKey?: string;
+}
+
+/**
+ * A refused chat call as a {@link CnctError}. The server's own `code` wins; then what this
+ * particular endpoint's status means (`codes`); then a 401 is `unauthenticated`; and anything else
+ * is `request_failed`, as it always was. The sentence is the server's, for a person.
+ */
+function chatFailure(
+  status: number,
+  data: Record<string, unknown>,
+  codes: Record<number, string> = {},
+): CnctError {
+  const message = typeof data.error === 'string' ? data.error : 'Something went wrong.';
+  const code =
+    typeof data.code === 'string'
+      ? data.code
+      : (codes[status] ??
+        (status === 401
+          ? CnctErrorCode.unauthenticated
+          : status === 429
+            ? CnctErrorCode.rateLimited
+            : CnctErrorCode.requestFailed));
+  return new CnctError(message, code, status, data);
+}
+
+/** The device's IANA time zone, or undefined where the runtime will not say. */
+function deviceTimeZone(): string | undefined {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function isThenable<T>(value: unknown): value is Promise<T> {

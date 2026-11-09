@@ -122,6 +122,17 @@ export const CnctErrorCode = {
    * not on file, no ticket types are configured — and this is that, raised.
    */
   toolRefused: 'tool_refused',
+  /** More files than one message may carry — ten. Said before anything is uploaded. */
+  tooManyFiles: 'too_many_files',
+  /** A file over the 50 MB a message may carry. Said before anything is uploaded. */
+  fileTooLarge: 'file_too_large',
+  /**
+   * A kind of file the chat does not take, or a HEIC photo this runtime cannot turn into a JPEG.
+   * Said before anything is uploaded.
+   */
+  unsupportedFileType: 'unsupported_file_type',
+  /** An upload the caller cancelled with its `signal`. Not a failure, and not worth reporting. */
+  cancelled: 'cancelled',
 } as const;
 
 export type CnctErrorCodeValue = (typeof CnctErrorCode)[keyof typeof CnctErrorCode];
