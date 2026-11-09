@@ -205,7 +205,9 @@ export class CnctChatClient {
      * goes rather than being shown above a conversation it is not part of.
      */
     const fresh = this.state.status === 'ended' || this.state.conversation?.status === 'CLOSED';
-    this.adoptSession(fresh ? { ...data, messages: data.messages ?? [] } : data);
+    this.adoptSession(fresh ? { ...data, messages: data.messages ?? [] } : data, {
+      keepLocal: !fresh,
+    });
     if (fresh) {
       // The old socket was subscribed to the old conversation. Start the new one on a new socket.
       this.disconnect();
@@ -1039,7 +1041,7 @@ export class CnctChatClient {
     this.patch({ messages });
   }
 
-  private adoptSession(data: CnctChatSession): void {
+  private adoptSession(data: CnctChatSession, options: { keepLocal?: boolean } = {}): void {
     if (data.token) {
       this.token = data.token;
       this.persist(data.token);
@@ -1047,9 +1049,31 @@ export class CnctChatClient {
     this.patch({
       visitor: data.visitor ?? this.state.visitor,
       conversation: data.conversation ?? this.state.conversation,
-      messages: data.messages ?? this.state.messages,
+      messages: data.messages
+        ? options.keepLocal === false
+          ? data.messages
+          : this.withUnsent(data.messages)
+        : this.state.messages,
       error: null,
     });
+  }
+
+  /**
+   * The server's transcript, with the visitor's own messages it does not have yet put back on the
+   * end — the one in flight and the one that failed.
+   *
+   * A refetched transcript is the truth about what was *stored*, and a message that never arrived
+   * is, rightly, not in it. Replacing the list wholesale made a failed message, and its retry
+   * button, vanish the moment the socket reconnected — which is exactly when a visitor whose message
+   * failed for want of a network would reach for it.
+   */
+  private withUnsent(stored: CnctChatMessage[]): CnctChatMessage[] {
+    const keys = new Set(stored.map((m) => m.clientKey).filter(Boolean));
+    const unsent = this.state.messages.filter(
+      (m) => (m.pending || m.failed) && m.clientKey && !keys.has(m.clientKey),
+    );
+    if (!unsent.length) return stored;
+    return [...stored, ...unsent].sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt));
   }
 
   private forgetSession(): void {

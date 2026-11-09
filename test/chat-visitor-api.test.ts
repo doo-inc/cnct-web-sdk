@@ -548,6 +548,25 @@ describe('sending files and choices', () => {
     chat.disconnect();
   });
 
+  it('keeps a failed message, and its retry, through a transcript refetch', async () => {
+    const chat = clientFor(cnct, { socket: false });
+    await chat.start({ displayName: 'Layla' });
+    await chat.send('Stored');
+    cnct.stub('POST /api/chat/public/messages', { status: 503, body: { error: 'Down.' } });
+    await expect(chat.send('Not stored', { clientKey: 'lost' })).rejects.toThrow();
+
+    // What a reconnect does: read the whole transcript back from the server.
+    await chat.resume();
+    expect(chat.state.messages.map((m) => [m.body, Boolean(m.failed)])).toEqual([
+      ['Stored', false],
+      ['Not stored', true],
+    ]);
+    await chat.retry('lost');
+    expect(chat.state.messages.map((m) => m.body)).toEqual(['Stored', 'Not stored']);
+    expect(chat.state.messages.some((m) => m.failed)).toBe(false);
+    chat.disconnect();
+  });
+
   it('calls a 409 on send conversation_closed', async () => {
     const chat = clientFor(cnct, { socket: false });
     await chat.start({ displayName: 'Layla' });
